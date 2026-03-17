@@ -1,0 +1,13 @@
+experiment:
+  name: pinchbench_ecoclaw
+  benchmark: pinchbench
+  model: openrouter/anthropic/claude-sonnet-4
+  judge: openrouter/anthropic/claude-opus-4.5
+  suite: automated-only
+  runs: 3
+  timeout_multiplier: 1.0
+  output_dir: D:/EcoClaw-Bench/results/raw/pinchbench/ecoclaw
+  upload: false
+  ecoclaw:
+    enabled: true
+    state_dir: D:/EcoClaw/.state
