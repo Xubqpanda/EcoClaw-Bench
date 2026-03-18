@@ -48,17 +48,7 @@ Then edit `.env` and fill your values:
 
 See [env.md](env.md) for details.
 
-## 5) Run benchmark scripts
-
-Windows (PowerShell):
-
-```powershell
-.\experiments\scripts\run_pinchbench_baseline.ps1
-.\experiments\scripts\run_pinchbench_ecoclaw.ps1
-.\experiments\scripts\compare_pinchbench_results.ps1
-```
-
-Linux/macOS (bash):
+## 5) Run benchmark scripts (Linux)
 
 ```bash
 chmod +x experiments/scripts/*.sh

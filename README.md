@@ -41,7 +41,7 @@ cp .env.example .env
 
 Detailed variable reference: [docs/env.md](docs/env.md)
 
-## Quick Start
+## Quick Start (Linux)
 
 1. Read [docs/install.md](docs/install.md)
 2. Fill [`.env.example`](.env.example) fields in your local `.env`
@@ -49,13 +49,7 @@ Detailed variable reference: [docs/env.md](docs/env.md)
 4. Run EcoClaw-enabled
 5. Compare outputs
 
-Windows (PowerShell):
-
-- [experiments/scripts/run_pinchbench_baseline.ps1](experiments/scripts/run_pinchbench_baseline.ps1)
-- [experiments/scripts/run_pinchbench_ecoclaw.ps1](experiments/scripts/run_pinchbench_ecoclaw.ps1)
-- [experiments/scripts/compare_pinchbench_results.ps1](experiments/scripts/compare_pinchbench_results.ps1)
-
-Linux/macOS (bash):
+Linux (bash):
 
 - [experiments/scripts/run_pinchbench_baseline.sh](experiments/scripts/run_pinchbench_baseline.sh)
 - [experiments/scripts/run_pinchbench_ecoclaw.sh](experiments/scripts/run_pinchbench_ecoclaw.sh)
