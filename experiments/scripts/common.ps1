@@ -72,3 +72,22 @@ function Apply-EcoClawEnv {
     $env:OPENROUTER_BASE_URL = $env:ECOCLAW_BASE_URL
   }
 }
+
+function Resolve-UvCommand {
+  $uvCmd = Get-Command uv -ErrorAction SilentlyContinue
+  if ($uvCmd) {
+    return "uv"
+  }
+
+  # Common user install location on Windows
+  $pyRoot = Join-Path $env:APPDATA "Python"
+  if (Test-Path $pyRoot) {
+    $userUv = Get-ChildItem -Path $pyRoot -Filter uv.exe -Recurse -ErrorAction SilentlyContinue |
+      Select-Object -First 1 -ExpandProperty FullName
+    if ($userUv) {
+      return $userUv
+    }
+  }
+
+  return $null
+}

@@ -23,12 +23,22 @@ $ResolvedTimeout = if ($TimeoutMultiplier -gt 0) { $TimeoutMultiplier } elseif (
 $OutputDir = "D:/EcoClaw-Bench/results/raw/pinchbench/ecoclaw"
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 
-Set-Location D:/skill
-uv run scripts/benchmark.py `
-  --model $ResolvedModel `
-  --judge $ResolvedJudge `
-  --suite $ResolvedSuite `
-  --runs $ResolvedRuns `
-  --timeout-multiplier $ResolvedTimeout `
-  --output-dir $OutputDir `
-  --no-upload
+$UvBin = Resolve-UvCommand
+if (-not $UvBin) {
+  throw "uv not found. Install with: python -m pip install --user uv"
+}
+
+Push-Location D:/skill
+try {
+  & $UvBin run scripts/benchmark.py `
+    --model $ResolvedModel `
+    --judge $ResolvedJudge `
+    --suite $ResolvedSuite `
+    --runs $ResolvedRuns `
+    --timeout-multiplier $ResolvedTimeout `
+    --output-dir $OutputDir `
+    --no-upload
+}
+finally {
+  Pop-Location
+}
