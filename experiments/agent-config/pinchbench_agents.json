@@ -2,14 +2,13 @@
   "agents": {
     "defaults": {
       "model": {
-        "primary": "tuzi/gpt-5.4",
+        "primary": "dmx/gpt-5.4-mini",
         "fallbacks": [
-          "custom-llm/gemini-2.5-flash",
-          "custom-llm/claude-sonnet-4"
+          "dmx/gpt-5.4"
         ]
       },
       "subagents": {
-        "model": "tuzi/gpt-5.4",
+        "model": "dmx/gpt-5.4-mini",
         "thinking": "medium",
         "maxConcurrent": 3,
         "archiveAfterMinutes": 30
@@ -23,7 +22,7 @@
         "id": "coordinator",
         "default": true,
         "name": "Orchestrator",
-        "model": "tuzi/gpt-5.4",
+        "model": "dmx/gpt-5.4-mini",
         "skills": [
           "workflow-orchestration-patterns",
           "summarize",
@@ -40,7 +39,7 @@
       {
         "id": "coder",
         "name": "Coding Agent",
-        "model": "tuzi/gpt-5.3-codex",
+        "model": "dmx/gpt-5.4-mini",
         "skills": [
           "coding-agent",
           "code-style",
@@ -51,7 +50,7 @@
       {
         "id": "researcher",
         "name": "Research Agent",
-        "model": "tuzi/gpt-5.4",
+        "model": "dmx/gpt-5.4-mini",
         "skills": [
           "tavily",
           "search-first",
