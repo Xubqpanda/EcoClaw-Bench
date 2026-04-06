@@ -25,5 +25,5 @@
 npm install -g @tobilu/qmd
 
 # 索引 task 文件
-qmd collection add /path/to/EcoClaw/skill/tasks --name pinchbench-tasks
+qmd collection add /path/to/Baseline/skill/tasks --name pinchbench-tasks
 HF_ENDPOINT=https://hf-mirror.com qmd embed

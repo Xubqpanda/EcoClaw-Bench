@@ -1,7 +1,0 @@
-{
-    "id": "ecoclaw-hooks",
-    "name": "EcoClaw Optimization Hooks",
-    "description": "Bridges EcoClaw token-efficiency modules (cache, summary, compression, retrieval, router) into OpenClaw via plugin hooks. Controlled by ECOCLAW_ENABLE_* environment variables.",
-    "version": "0.1.0",
-    "configSchema": {}
-}

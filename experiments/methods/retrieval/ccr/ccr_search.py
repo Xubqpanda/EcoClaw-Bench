@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-ContextualCompressionRetriever CLI tool for EcoClaw.
+ContextualCompressionRetriever CLI tool for Baseline.
 
 Uses LangChain's ContextualCompressionRetriever to:
 1. Retrieve relevant documents using FAISS + bge-large-zh-v1.5 embeddings (local model)
@@ -18,7 +18,7 @@ Usage:
 Environment variables:
     ECOCLAW_API_KEY / OPENAI_API_KEY  — API key for compression LLM
     ECOCLAW_BASE_URL / OPENAI_BASE_URL — Custom API endpoint for compression LLM
-    CCR_INDEX_DIR — Where to store the index (default: ~/.ecoclaw-state/ccr-index)
+    CCR_INDEX_DIR — Where to store the index (default: ~/.baseline-state/ccr-index)
     CCR_COMPRESSOR_MODEL — Model for compression (default: gmn/gpt-5.4)
     CCR_EMBEDDING_MODEL — Local path to embedding model (default: auto-detect bge-large-zh-v1.5)
 """
@@ -30,15 +30,15 @@ import pickle
 import sys
 from pathlib import Path
 
-# Resolve API config from EcoClaw env vars
+# Resolve API config from Baseline env vars
 api_key = os.environ.get("ECOCLAW_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
 base_url = os.environ.get("ECOCLAW_BASE_URL") or os.environ.get("OPENAI_BASE_URL", "")
-index_dir = os.environ.get("CCR_INDEX_DIR", os.path.expanduser("~/.ecoclaw-state/ccr-index"))
+index_dir = os.environ.get("CCR_INDEX_DIR", os.path.expanduser("~/.baseline-state/ccr-index"))
 compressor_model = os.environ.get("CCR_COMPRESSOR_MODEL", "gmn/gpt-5.4")
 
 # Auto-detect local bge model path
 _SCRIPT_DIR = Path(__file__).resolve().parent
-_BENCH_ROOT = _SCRIPT_DIR.parent.parent  # EcoClaw-Bench root
+_BENCH_ROOT = _SCRIPT_DIR.parent.parent  # Baseline-Bench root
 _DEFAULT_MODEL_PATHS = [
     os.environ.get("CCR_EMBEDDING_MODEL", ""),
     str(_BENCH_ROOT / "local_models" / "Xorbits" / "bge-large-zh-v1___5"),
@@ -269,7 +269,7 @@ def do_search(query: str, top_n: int = 3, use_compression: bool = True) -> None:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="CCR Search CLI for EcoClaw")
+    parser = argparse.ArgumentParser(description="CCR Search CLI for Baseline")
     subparsers = parser.add_subparsers(dest="command")
 
     # Index command

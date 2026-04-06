@@ -6,8 +6,8 @@
 
 ```bash
 # 1. 启动 LycheeMem 后端（在另一个终端）
-cd /home/user/cdm_program/EcoClaw-Bench/experiments/methods/LycheeMem
-PYTHONPATH=/home/user/cdm_program/EcoClaw-Bench python main.py
+cd /home/user/cdm_program/Baseline-Bench/experiments/methods/LycheeMem
+PYTHONPATH=/home/user/cdm_program/Baseline-Bench python main.py
 # 等待显示 Uvicorn running on http://127.0.0.1:8000
 
 # 2a. 单 Agent 模式

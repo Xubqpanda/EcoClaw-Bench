@@ -20,7 +20,7 @@
 conda run -n cdm_env pip install langchain langchain-community langchain-openai faiss-cpu langchain-classic
 
 # 构建 FAISS 索引
-conda run -n cdm_env python experiments/methods/ccr/ccr_search.py index --docs-dir /path/to/EcoClaw/skill/tasks
+conda run -n cdm_env python experiments/methods/ccr/ccr_search.py index --docs-dir /path/to/Baseline/skill/tasks
 ```
 
 ## 环境变量

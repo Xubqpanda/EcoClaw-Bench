@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Selective Context Prompt Compression CLI for EcoClaw.
+Selective Context Prompt Compression CLI for Baseline.
 
 Implements the Selective Context algorithm (Li et al., 2023) for prompt compression.
 Uses self-information from a small language model (GPT-2) to identify and remove

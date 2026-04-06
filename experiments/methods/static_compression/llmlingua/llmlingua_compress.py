@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-LLMLingua-2 Prompt Compression CLI for EcoClaw.
+LLMLingua-2 Prompt Compression CLI for Baseline.
 
 Compresses prompt text using Microsoft's LLMLingua-2 to reduce token count
 while preserving key information.

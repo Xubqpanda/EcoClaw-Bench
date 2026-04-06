@@ -1,6 +1,6 @@
 // @ts-nocheck
 /**
- * EcoClaw Optimization Hooks — OpenClaw Plugin
+ * Baseline Optimization Hooks — OpenClaw Plugin
  *
  * Reads ECOCLAW_ENABLE_* environment variables and registers the corresponding
  * OpenClaw lifecycle hooks. Each module is independently toggleable so that
@@ -39,7 +39,7 @@ const env = (key) => process.env[key] === "1";
 
 const STATE_DIR = process.env.ECOCLAW_STATE_DIR || join(
     process.env.HOME || "/tmp",
-    ".ecoclaw-state",
+    ".baseline-state",
 );
 
 /**
@@ -169,7 +169,7 @@ async function qmdSearch(query, topN = QMD_TOP_N, minScore = QMD_MIN_SCORE) {
 const CCR_TOP_N = Number(process.env.ECOCLAW_CCR_TOPN || "3");
 const CCR_SCRIPT = process.env.ECOCLAW_CCR_SCRIPT || join(
     process.env.HOME || "/tmp",
-    "cdm_program/EcoClaw-Bench/experiments/methods/retrieval/ccr/ccr_search.py",  // retrieval/ccr — unchanged
+    "cdm_program/Baseline-Bench/experiments/methods/retrieval/ccr/ccr_search.py",  // retrieval/ccr — unchanged
 );
 const CCR_PYTHON = process.env.ECOCLAW_CCR_PYTHON || "python";
 
@@ -202,7 +202,7 @@ async function ccrSearch(query, topN = CCR_TOP_N) {
 
 const LLMLINGUA_SCRIPT = process.env.ECOCLAW_LLMLINGUA_SCRIPT || join(
     process.env.HOME || "/tmp",
-    "cdm_program/EcoClaw-Bench/experiments/methods/static_compression/llmlingua/llmlingua_compress.py",
+    "cdm_program/Baseline-Bench/experiments/methods/static_compression/llmlingua/llmlingua_compress.py",
 );
 const LLMLINGUA_RATE = process.env.ECOCLAW_LLMLINGUA_RATE || "0.5";
 const LLMLINGUA_MIN_LENGTH = Number(process.env.ECOCLAW_LLMLINGUA_MIN_LENGTH || "200");
@@ -234,7 +234,7 @@ async function llmlinguaCompress(text) {
 
 const SELCTX_SCRIPT = process.env.ECOCLAW_SELCTX_SCRIPT || join(
     process.env.HOME || "/tmp",
-    "cdm_program/EcoClaw-Bench/experiments/methods/static_compression/selective-context/selective_context.py",
+    "cdm_program/Baseline-Bench/experiments/methods/static_compression/selective-context/selective_context.py",
 );
 const SELCTX_RATIO = process.env.ECOCLAW_SELCTX_RATIO || "0.4";
 const SELCTX_UNIT = process.env.ECOCLAW_SELCTX_UNIT || "sentence"; // "sentence" | "phrase" | "token"
@@ -352,8 +352,8 @@ const SMALL_BUDGET = Number(process.env.ECOCLAW_SMALL_TASK_TOKEN_BUDGET || "2000
 
 /** @type {import("openclaw/plugin-sdk").OpenClawPluginDefinition} */
 const plugin = {
-    id: "ecoclaw-hooks",
-    name: "EcoClaw Optimization Hooks",
+    id: "baseline-hooks",
+    name: "Baseline Optimization Hooks",
     version: "0.1.0",
 
     /**
@@ -381,9 +381,9 @@ const plugin = {
             .map(([k]) => k);
 
         if (active.length === 0) {
-            api.logger.info("[ecoclaw] All modules disabled — running as baseline.");
+            api.logger.info("[baseline] All modules disabled — running as baseline.");
         } else {
-            api.logger.info(`[ecoclaw] Active modules: ${active.join(", ")}`);
+            api.logger.info(`[baseline] Active modules: ${active.join(", ")}`);
         }
 
         const summaryDir = join(STATE_DIR, "summaries");
@@ -401,7 +401,7 @@ const plugin = {
         // - Anthropic format: usage_metadata with input_tokens, output_tokens
 
         api.on("llm_output", async (event) => {
-            api.logger.debug("[ecoclaw] llm_output event: provider=%s eventKeys=%s",
+            api.logger.debug("[baseline] llm_output event: provider=%s eventKeys=%s",
                 event.provider, Object.keys(event).join(","));
 
             // Try to extract usage data (compatible with multiple formats)
@@ -412,7 +412,7 @@ const plugin = {
             }
 
             if (!extractedUsage || extractedUsage.total === 0) {
-                api.logger.debug("[ecoclaw] No valid usage data extracted from event");
+                api.logger.debug("[baseline] No valid usage data extracted from event");
                 return;
             }
 
@@ -428,7 +428,7 @@ const plugin = {
                     ts: new Date().toISOString(),
                 });
                 api.logger.info(
-                    "[ecoclaw] Captured usage: provider=%s input=%d output=%d total=%d",
+                    "[baseline] Captured usage: provider=%s input=%d output=%d total=%d",
                     event.provider,
                     extractedUsage.input || 0,
                     extractedUsage.output || 0,
@@ -461,7 +461,7 @@ const plugin = {
             const cacheWrite = usage.cache_write_tokens || usage.cacheWrite || 0;
 
             if (total === 0) {
-                logger.debug("[ecoclaw] Extracted usage is zero: input=%d output=%d", input, output);
+                logger.debug("[baseline] Extracted usage is zero: input=%d output=%d", input, output);
                 return null;
             }
 
@@ -624,7 +624,7 @@ const plugin = {
                     .join("\n\n");
 
                 api.logger.info(
-                    "[ecoclaw] QMD retrieved %d results for prompt (top score: %s%%)",
+                    "[baseline] QMD retrieved %d results for prompt (top score: %s%%)",
                     results.length,
                     results[0] ? (results[0].score * 100).toFixed(0) : "0",
                 );
@@ -653,7 +653,7 @@ const plugin = {
                     .join("\n\n");
 
                 api.logger.info(
-                    "[ecoclaw] CCR retrieved %d compressed results for prompt",
+                    "[baseline] CCR retrieved %d compressed results for prompt",
                     results.length,
                 );
 
@@ -675,7 +675,7 @@ const plugin = {
                 const compressed = await llmlinguaCompress(content);
                 if (compressed !== content && compressed.length < content.length) {
                     api.logger.info(
-                        "[ecoclaw] LLMLingua compressed tool output: %d → %d chars (%.0f%% reduction)",
+                        "[baseline] LLMLingua compressed tool output: %d → %d chars (%.0f%% reduction)",
                         content.length,
                         compressed.length,
                         (1 - compressed.length / content.length) * 100,
@@ -699,7 +699,7 @@ const plugin = {
                 const compressed = await selectiveContextCompress(content);
                 if (compressed !== content && compressed.length < content.length) {
                     api.logger.info(
-                        "[ecoclaw] SelectiveContext compressed tool output: %d → %d chars (%.0f%% reduction)",
+                        "[baseline] SelectiveContext compressed tool output: %d → %d chars (%.0f%% reduction)",
                         content.length,
                         compressed.length,
                         (1 - compressed.length / content.length) * 100,

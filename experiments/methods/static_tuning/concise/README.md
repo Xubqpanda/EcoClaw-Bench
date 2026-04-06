@@ -15,7 +15,7 @@
 
 ## 无额外依赖
 
-纯 ecoclaw-hooks 模块，通过 `ECOCLAW_ENABLE_CONCISE=1` 启用。
+纯 baseline-hooks 模块，通过 `ECOCLAW_ENABLE_CONCISE=1` 启用。
 
 ## 注入的指令
 
