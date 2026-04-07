@@ -40,6 +40,7 @@ resolve_model_alias() {
   case "${model_like}" in
     gpt-oss-20b) printf '%s/gpt-oss-20b\n' "${openai_provider_prefix}" ;;
     gpt-oss-120b) printf '%s/gpt-oss-120b\n' "${openai_provider_prefix}" ;;
+    gpt-5.4-mini) printf '%s/gpt-5.4-mini\n' "${openai_provider_prefix}" ;;
     gpt-5-nano) printf '%s/gpt-5-nano\n' "${openai_provider_prefix}" ;;
     gpt-5-mini) printf '%s/gpt-5-mini\n' "${openai_provider_prefix}" ;;
     gpt-5) printf '%s/gpt-5\n' "${openai_provider_prefix}" ;;
@@ -61,6 +62,9 @@ resolve_model_alias() {
     claude-sonnet-4) printf 'openrouter/anthropic/claude-sonnet-4\n' ;;
     claude-opus-4.1) printf 'openrouter/anthropic/claude-opus-4.1\n' ;;
     claude-haiku-4.5) printf 'openrouter/anthropic/claude-haiku-4.5\n' ;;
+    minimax2.7) printf 'minimax/MiniMax-M2.7\n' ;;
+    minimax2) printf 'minimax/MiniMax-M2.7\n' ;;
+    minimax) printf 'minimax/MiniMax-M2.7\n' ;;
     *)
       printf 'Unknown model alias: %s\n' "${model_like}" >&2
       return 1
@@ -76,6 +80,14 @@ apply_ecoclaw_env() {
   if [[ -n "${ECOCLAW_BASE_URL:-}" ]]; then
     export OPENAI_BASE_URL="${ECOCLAW_BASE_URL}"
     export OPENROUTER_BASE_URL="${ECOCLAW_BASE_URL}"
+  fi
+  # MiniMax provider support
+  if [[ -n "${MINIMAX_API_KEY:-}" ]]; then
+    export MINIMAX_API_KEY="${MINIMAX_API_KEY}"
+  fi
+  # GMN provider support
+  if [[ -n "${GMN_API_KEY:-}" ]]; then
+    export GMN_API_KEY="${GMN_API_KEY}"
   fi
 }
 
@@ -195,24 +207,37 @@ recover_stale_openclaw_config_backup() {
 }
 
 ensure_openclaw_gateway_running() {
-  if openclaw status 2>/dev/null | grep -q 'Gateway.*unreachable'; then
-    echo "OpenClaw gateway is unreachable; starting a local gateway..."
-    nohup openclaw gateway --force >/tmp/openclaw_gateway.log 2>&1 &
-    local gateway_pid=$!
-    local attempts=0
-    while [[ ${attempts} -lt 20 ]]; do
-      if openclaw status 2>/dev/null | grep -q 'Gateway.*local .*18789' && \
-         ! openclaw status 2>/dev/null | grep -q 'Gateway.*unreachable'; then
-        echo "OpenClaw gateway is ready (pid=${gateway_pid})"
-        return 0
-      fi
-      attempts=$((attempts + 1))
-      sleep 1
-    done
-    echo "ERROR: OpenClaw gateway failed to become reachable. See /tmp/openclaw_gateway.log" >&2
-    return 1
+  local status_output
+  status_output="$(openclaw status 2>/dev/null || true)"
+
+  # Check if gateway is running (even if scope error exists)
+  if echo "${status_output}" | grep -q 'Gateway.*local.*18789'; then
+    # Gateway process is listening — may have scope warnings but it's operational
+    echo "OpenClaw gateway is running on port 18789"
+    return 0
   fi
-  echo "OpenClaw gateway is reachable"
+
+  # Check if systemd service is running
+  if echo "${status_output}" | grep -q 'Gateway service.*running'; then
+    echo "OpenClaw gateway service is running (systemd)"
+    return 0
+  fi
+
+  # Gateway is truly not running — start it
+  echo "OpenClaw gateway is not running; starting a local gateway..."
+  nohup openclaw gateway --force >/tmp/openclaw_gateway.log 2>&1 &
+  local gateway_pid=$!
+  local attempts=0
+  while [[ ${attempts} -lt 20 ]]; do
+    if openclaw status 2>/dev/null | grep -q 'Gateway.*local.*18789'; then
+      echo "OpenClaw gateway is ready (pid=${gateway_pid})"
+      return 0
+    fi
+    attempts=$((attempts + 1))
+    sleep 1
+  done
+  echo "ERROR: OpenClaw gateway failed to start. See /tmp/openclaw_gateway.log" >&2
+  return 1
 }
 
 cleanup_bench_agents_and_gateway() {

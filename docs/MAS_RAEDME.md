@@ -84,7 +84,9 @@ EcoClaw-Bench/
 │       ├── run_pinchbench_ecoclaw.sh    # PinchBench EcoClaw 运行脚本
 │       ├── run_pinchbench_baseline.sh   # PinchBench Baseline 运行脚本
 │       ├── run_claw_eval.sh             # Claw-Eval 运行脚本
-│       └── run_frontierscience.sh       # FrontierScience 运行脚本
+│       ├── run_frontierscience.sh       # FrontierScience 运行脚本
+│       ├── run_pinchbench_methods.sh    # 单 Agent 方法消融实验
+│       └── run_pinchbench_methods_mas.sh # 方法×MAS 联合消融实验 ⭐
 ```
 
 ---
@@ -290,7 +292,63 @@ SKILLS_DIR="${AGENT_CONFIG_DIR}/../skills"
 
 ## 7. 运行方式
 
-### 7.1 PinchBench
+### 7.1 方法×MAS 联合消融实验 ⭐
+
+当你需要在多智能体模式下测试各种节省 token 的方法时，使用 `run_pinchbench_methods_mas.sh`：
+
+```bash
+# 单个方法 + MAS（完整模式，推荐）
+bash experiments/scripts/run_pinchbench_methods_mas.sh \
+  --label ccr-only \
+  --agent-config experiments/agent-config/pinchbench_agents.json
+
+# 单个方法 + MAS（轻量模式）
+bash experiments/scripts/run_pinchbench_methods_mas.sh \
+  --label ccr-only
+
+# 所有方法 + MAS（批量运行）
+bash experiments/scripts/run_pinchbench_methods_mas.sh --all \
+  --agent-config experiments/agent-config/pinchbench_agents.json
+```
+
+**可用的方法标签：**
+
+| 标签 | 方法 | 说明 |
+|------|------|------|
+| `baseline` | 无方法 | 纯 MAS 基线 |
+| `prefix-cache` | OpenAI Prefix Cache | 稳定前缀触发 provider 缓存 |
+| `cache-only` | Prompt Cache | 缓存编排 |
+| `summary-only` | Session Summary | 空闲摘要 + context 注入 |
+| `compression-only` | Tool Compression | 规则压缩工具输出 |
+| `retrieval-only` | Keyword Retrieval | 关键词检索 |
+| `router-only` | Model Router | 简单任务路由到小模型 |
+| `qmd-only` | QMD Search | 全文检索 |
+| `qmd-vsearch` | QMD VSearch | 向量检索 |
+| `qmd-query` | QMD Query | LLM 查询 |
+| `ccr-only` | CCR | LangChain 上下文压缩检索 |
+| `llmlingua-only` | LLMLingua-2 | Token 级压缩 |
+| `selctx-only` | Selective Context | 自信息压缩 |
+| `concise-only` | Concise Output | 简洁输出指令 |
+| `slim-prompt` | Slim Prompt | 精简系统提示 |
+| `concise-slim` | Concise + Slim | 组合方法 |
+| `lycheemem` | LycheeMem | 结构化长期记忆 |
+| `compaction` | Compaction | OpenClaw 历史压缩 |
+| `compaction-lcm` | Compaction + LCM | 历史压缩 + 无损上下文引擎 |
+
+**结果目录：**
+- MAS 模式: `results/raw/pinchbench/mas-<label>/`
+- 单 Agent 模式: `results/raw/pinchbench/<label>/`
+
+> **提示：** 对比单 Agent 和 MAS 下同一方法的效果，可以分别运行：
+> ```bash
+> # 单 Agent
+> bash experiments/scripts/run_pinchbench_methods.sh --label ccr-only
+> # MAS
+> bash experiments/scripts/run_pinchbench_methods_mas.sh --label ccr-only \
+>   --agent-config experiments/agent-config/pinchbench_agents.json
+> ```
+
+### 7.2 PinchBench
 
 ```bash
 # EcoClaw + MAS（完整模式，推荐）
