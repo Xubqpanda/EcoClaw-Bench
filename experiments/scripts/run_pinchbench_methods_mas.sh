@@ -115,6 +115,12 @@ reset_gateway_plugins() {
   echo "  ✅ Gateway plugins reset"
 }
 
+reset_openspace() {
+  stop_openspace_server
+  unregister_openspace_plugin
+  reset_gateway_plugins
+}
+
 # ── MAS config injection helper ───────────────────────────────────────────────
 # Injects MAS topology into openclaw.json, returns 0.
 # Must be called AFTER ensure_openclaw_gateway_running.
@@ -186,6 +192,9 @@ run_single() {
     ccr-only)           export ECOCLAW_ENABLE_CCR=1 ;;
     llmlingua-only)     export ECOCLAW_ENABLE_LLMLINGUA=1 ;;
     selctx-only)        export ECOCLAW_ENABLE_SELCTX=1 ;;
+    tokenqrusher-only)
+      "${SCRIPT_DIR}/enable_tokenqrusher_hooks.sh"
+      ;;
     evermemos)
       if [[ ! -d "${evermemos_plugin_dir}" ]]; then
         echo "EverMemOS plugin dir not found: ${evermemos_plugin_dir}" >&2
@@ -242,15 +251,40 @@ run_single() {
       openclaw gateway restart 2>/dev/null || true
       sleep 3
       ;;
+    openspace|openspace-cold)
+      # OpenSpace Phase 1 — cold start: agent delegates ALL tasks via execute_task
+      start_openspace_server cold
+      register_openspace_plugin
+      openclaw gateway restart 2>/dev/null || true
+      sleep 3
+      ;;
+    openspace-hot)
+      # OpenSpace Phase 2 — hot rerun: uses skill library built by openspace-cold
+      start_openspace_server hot
+      register_openspace_plugin
+      openclaw gateway restart 2>/dev/null || true
+      sleep 3
+      ;;
+    openspace-compaction)
+      # OpenSpace + safeguard compaction
+      start_openspace_server
+      register_openspace_plugin
+      openclaw config set agents.defaults.compaction.mode safeguard 2>/dev/null || true
+      openclaw config set plugins.entries.lossless-claw.enabled false 2>/dev/null || true
+      openclaw gateway restart 2>/dev/null || true
+      sleep 3
+      ;;
     *)
       echo "Unknown label: ${label}" >&2
-      echo "Valid labels: baseline, prefix-cache, qmd-only, qmd-vsearch, qmd-query, ccr-only, llmlingua-only, selctx-only, evermemos, context-saver-only, token-saver-only, ilang-only, concise-only, slim-prompt, concise-slim, token-opt, lycheemem, compaction, compaction-lcm" >&2
+      echo "Valid labels: baseline, prefix-cache, qmd-only, qmd-vsearch, qmd-query, ccr-only," >&2
+      echo "  llmlingua-only, selctx-only, tokenqrusher-only, concise-only, slim-prompt, concise-slim," >&2
+      echo "  lycheemem, compaction, compaction-lcm, openspace-cold, openspace-hot, openspace-compaction" >&2
       return 1
       ;;
   esac
 
-  # For baseline: ensure compaction is in default mode and all extra plugins disabled
-  if [[ "${label}" == "baseline" ]]; then
+  # For baseline / tokenqrusher: ensure compaction is in default mode and all extra plugins disabled
+  if [[ "${label}" == "baseline" || "${label}" == "tokenqrusher-only" ]]; then
     openclaw config set agents.defaults.compaction.mode default 2>/dev/null || true
     openclaw config set plugins.entries.lossless-claw.enabled false 2>/dev/null || true
     openclaw config set plugins.entries.lycheemem-tools.enabled false 2>/dev/null || true
@@ -280,7 +314,13 @@ run_single() {
   ensure_openclaw_gateway_running
   recover_stale_openclaw_config_backup
   inject_mas_config
-  trap 'restore_openclaw_config || true' EXIT
+  _mas_bench_exit_cleanup() {
+    if [[ "${label}" == "tokenqrusher-only" ]]; then
+      "${SCRIPT_DIR}/disable_tokenqrusher_hooks.sh" || true
+    fi
+    restore_openclaw_config || true
+  }
+  trap _mas_bench_exit_cleanup EXIT
 
   if [[ "${evermemos_enabled}" == "1" ]]; then
     python3 - <<'PY' "${OPENCLAW_CONFIG_PATH}" "${evermemos_plugin_dir}" "${evermemos_plugin_name}" "${evermemos_base_url}" "${evermemos_user_id}" "${evermemos_group_id}" "${evermemos_top_k}" "${evermemos_retrieve_method}" "${evermemos_memory_types}"
@@ -359,6 +399,9 @@ PY
   echo ""
 
   # ── Restore openclaw config & cleanup gateway-level plugins ─────────────
+  if [[ "${label}" == "tokenqrusher-only" ]]; then
+    "${SCRIPT_DIR}/disable_tokenqrusher_hooks.sh" || true
+  fi
   restore_openclaw_config || true
   # Reset the EXIT trap since we've already restored
   trap - EXIT
@@ -370,6 +413,9 @@ PY
   case "${label}" in
     lycheemem|compaction|compaction-lcm|baseline|evermemos)
       reset_gateway_plugins
+      ;;
+    openspace|openspace-cold|openspace-hot|openspace-compaction)
+      reset_openspace
       ;;
   esac
 }
@@ -385,6 +431,7 @@ ALL_LABELS=(
   ccr-only
   llmlingua-only
   selctx-only
+  tokenqrusher-only
   evermemos
   context-saver-only
   token-saver-only
@@ -396,6 +443,9 @@ ALL_LABELS=(
   lycheemem
   compaction
   compaction-lcm
+  openspace-cold
+  openspace-hot
+  openspace-compaction
 )
 
 if [[ "${RUN_ALL}" == "true" ]]; then
@@ -426,9 +476,9 @@ else
   echo "       $0 --all [--agent-config <path>]" >&2
   echo "" >&2
   echo "Available labels:" >&2
-  echo "  baseline, prefix-cache, qmd-only, qmd-vsearch, qmd-query, ccr-only, llmlingua-only, selctx-only, evermemos," >&2
-  echo "  context-saver-only, token-saver-only, ilang-only, concise-only, slim-prompt, concise-slim, token-opt," >&2
-  echo "  lycheemem, compaction, compaction-lcm" >&2
+  echo "  baseline, prefix-cache, qmd-only, qmd-vsearch, qmd-query, ccr-only," >&2
+  echo "  llmlingua-only, selctx-only, tokenqrusher-only, concise-only, slim-prompt, concise-slim," >&2
+  echo "  lycheemem, compaction, compaction-lcm, openspace-cold, openspace-hot, openspace-compaction" >&2
   echo "" >&2
   echo "Options:" >&2
   echo "  --agent-config <path>  Use full agent topology (recommended)" >&2
