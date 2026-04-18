@@ -480,6 +480,34 @@ def _parse_jsonl_file(path: Path) -> List[Dict[str, Any]]:
     return entries
 
 
+def _dedupe_transcript_entries(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Deduplicate transcript entries while preserving order.
+
+    Some OpenClaw session-loading paths can return the same underlying JSONL
+    content multiple times (especially when synthetic session IDs resolve to
+    the latest real UUID session). This helper removes duplicate events by
+    stable key so usage/call counts are not inflated by repeated merges.
+    """
+    deduped: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        event_id = entry.get("id")
+        if event_id:
+            key = f"id:{event_id}"
+        else:
+            try:
+                key = f"hash:{hashlib.sha1(json.dumps(entry, sort_keys=True, ensure_ascii=False).encode('utf-8', errors='replace')).hexdigest()}"
+            except (TypeError, ValueError):
+                key = f"repr:{repr(entry)}"
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(entry)
+    return deduped
+
+
 def _extract_usage_from_transcript(transcript: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Sum token usage and cost from all assistant messages in transcript."""
     def _to_int(value: Any, default: int = 0) -> int:
@@ -665,6 +693,7 @@ def execute_openclaw_task(
     verbose: bool = False,
     enable_multi_agent: bool = False,
     multi_agent_ids: Dict[str, str] | None = None,
+    cleanup_sessions: bool = True,
 ) -> Dict[str, Any]:
     logger.info("🤖 Agent [%s] starting task: %s", agent_id, task.task_id)
     logger.info("   Task: %s", task.name)
@@ -678,10 +707,13 @@ def execute_openclaw_task(
 
     # Clean up previous session transcripts so we can reliably find this task's
     # transcript (OpenClaw uses its own UUID-based naming, not our session ID).
-    if enable_multi_agent and multi_agent_ids:
-        cleanup_multi_agent_sessions(multi_agent_ids)
-    else:
-        cleanup_agent_sessions(agent_id)
+    # In continuous-session mode we intentionally preserve history and let the
+    # caller slice per-task transcript ranges.
+    if cleanup_sessions:
+        if enable_multi_agent and multi_agent_ids:
+            cleanup_multi_agent_sessions(multi_agent_ids)
+        else:
+            cleanup_agent_sessions(agent_id)
 
     start_time = time.time()
     workspace = prepare_task_workspace(
@@ -790,7 +822,8 @@ def execute_openclaw_task(
             "Empty transcript for %s; retrying task execution once (session sync fallback).",
             task.task_id,
         )
-        cleanup_agent_sessions(agent_id)
+        if cleanup_sessions:
+            cleanup_agent_sessions(agent_id)
         retry_session_id = f"{session_id}_retry"
         retry_started_at = time.time()
         retry_stdout, retry_stderr, retry_exit_code, retry_timed_out = _run_once(
@@ -816,7 +849,8 @@ def execute_openclaw_task(
             retry_reason,
         )
         time.sleep(1.5)
-        cleanup_agent_sessions(agent_id)
+        if cleanup_sessions:
+            cleanup_agent_sessions(agent_id)
         retry_session_id = f"{session_id}_provider_retry"
         retry_started_at = time.time()
         retry_stdout, retry_stderr, retry_exit_code, retry_timed_out = _run_once(
@@ -1372,7 +1406,7 @@ def _load_transcripts_for_session_ids(
             continue
         seen.add(session_id)
         combined.extend(_load_transcript(agent_id, session_id, started_at))
-    return combined
+    return _dedupe_transcript_entries(combined)
 
 
 def _collect_all_session_transcripts(
@@ -1386,7 +1420,7 @@ def _collect_all_session_transcripts(
     - ``all_transcripts_flat`` merges all sessions (for usage aggregation).
     """
     coord_id = agent_ids.get("coordinator", "")
-    main_transcript = _load_transcript(coord_id, "", started_at)
+    main_transcript = _dedupe_transcript_entries(_load_transcript(coord_id, "", started_at))
 
     all_entries: List[Dict[str, Any]] = list(main_transcript)
 
@@ -1407,4 +1441,4 @@ def _collect_all_session_transcripts(
             entries = _parse_jsonl_file(jsonl_path)
             all_entries.extend(entries)
 
-    return main_transcript, all_entries
+    return main_transcript, _dedupe_transcript_entries(all_entries)
