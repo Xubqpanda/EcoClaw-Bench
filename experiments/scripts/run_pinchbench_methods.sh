@@ -7,6 +7,7 @@
 #
 # Usage:
 #   ./experiments/scripts/run_pinchbench_methods.sh --label baseline
+#   ./experiments/scripts/run_pinchbench_methods.sh --label baseline --execution-mode serial
 #   ./experiments/scripts/run_pinchbench_methods.sh --label qmd-only
 #   ./experiments/scripts/run_pinchbench_methods.sh --label ccr-only
 #   ./experiments/scripts/run_pinchbench_methods.sh --label llmlingua-only
@@ -36,6 +37,8 @@ JUDGE=""
 SUITE=""
 RUNS=""
 TIMEOUT_MULTIPLIER=""
+PARALLEL=""
+EXECUTION_MODE=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -46,10 +49,12 @@ while [[ $# -gt 0 ]]; do
     --suite) SUITE="${2:-}"; shift 2 ;;
     --runs) RUNS="${2:-}"; shift 2 ;;
     --timeout-multiplier) TIMEOUT_MULTIPLIER="${2:-}"; shift 2 ;;
+    --parallel) PARALLEL="${2:-}"; shift 2 ;;
+    --execution-mode) EXECUTION_MODE="${2:-}"; shift 2 ;;
     *)
       echo "Unknown argument: $1" >&2
       echo "Usage: $0 --label <baseline|prefix-cache|qmd-only|qmd-vsearch|qmd-query|ccr-only|llmlingua-only|selctx-only|tokenqrusher-only|concise-only|slim-prompt|concise-slim|lycheemem|compaction|compaction-lcm|openspace-cold|openspace-hot|openspace-compaction>" >&2
-      echo "       $0 --all" >&2
+      echo "       $0 --all [--execution-mode parallel|serial] [--parallel N]" >&2
       exit 1
       ;;
   esac
@@ -67,6 +72,24 @@ RESOLVED_JUDGE="$(resolve_model_alias "${JUDGE_LIKE}")"
 RESOLVED_SUITE="${SUITE:-${ECOCLAW_SUITE:-automated-only}}"
 RESOLVED_RUNS="${RUNS:-${ECOCLAW_RUNS:-1}}"
 RESOLVED_TIMEOUT="${TIMEOUT_MULTIPLIER:-${ECOCLAW_TIMEOUT_MULTIPLIER:-1.0}}"
+RESOLVED_PARALLEL="${PARALLEL:-${ECOCLAW_PARALLEL:-1}}"
+RESOLVED_EXECUTION_MODE="${EXECUTION_MODE:-${ECOCLAW_EXECUTION_MODE:-parallel}}"
+case "${RESOLVED_EXECUTION_MODE}" in
+  parallel)
+    RESOLVED_SESSION_MODE="isolated"
+    ;;
+  serial)
+    # Serial mode means sequential execution with transcript accumulation +
+    # per-task transcript slicing in benchmark.py.
+    RESOLVED_PARALLEL=1
+    RESOLVED_SESSION_MODE="continuous"
+    ;;
+  *)
+    echo "Unknown execution mode: ${RESOLVED_EXECUTION_MODE}" >&2
+    echo "Valid values: parallel, serial" >&2
+    exit 1
+    ;;
+esac
 
 # PinchBench code + tasks + assets: this repo copy (not external EcoClaw/skill).
 PINCHBENCH_ROOT="${REPO_ROOT}/experiments/dataset/pinchbench"
@@ -210,6 +233,7 @@ run_single() {
   echo "  PREFIX_CACHE=${ECOCLAW_ENABLE_PREFIX_CACHE}  QMD=${ECOCLAW_ENABLE_QMD}  CCR=${ECOCLAW_ENABLE_CCR}"
   echo "  LLMLINGUA=${ECOCLAW_ENABLE_LLMLINGUA}  SELCTX=${ECOCLAW_ENABLE_SELCTX}"
   echo "  CONCISE=${ECOCLAW_ENABLE_CONCISE}  SLIM_PROMPT=${ECOCLAW_ENABLE_SLIM_PROMPT}"
+  echo "  Execution Mode=${RESOLVED_EXECUTION_MODE}  Parallel=${RESOLVED_PARALLEL}  SessionMode=${RESOLVED_SESSION_MODE}"
   echo "  PinchBench: ${PINCHBENCH_ROOT}"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
@@ -223,6 +247,8 @@ run_single() {
     --judge "${RESOLVED_JUDGE}" \
     --suite "${RESOLVED_SUITE}" \
     --runs "${RESOLVED_RUNS}" \
+    --parallel "${RESOLVED_PARALLEL}" \
+    --session-mode "${RESOLVED_SESSION_MODE}" \
     --timeout-multiplier "${RESOLVED_TIMEOUT}" \
     --output-dir "${output_dir}" \
     --no-upload
@@ -265,6 +291,6 @@ elif [[ -n "${LABEL}" ]]; then
   run_single "${LABEL}"
 else
   echo "Usage: $0 --label <baseline|prefix-cache|qmd-only|qmd-vsearch|qmd-query|ccr-only|llmlingua-only|selctx-only|tokenqrusher-only|concise-only|slim-prompt|concise-slim|lycheemem|compaction|compaction-lcm|openspace-cold|openspace-hot|openspace-compaction>" >&2
-  echo "       $0 --all" >&2
+  echo "       $0 --all [--execution-mode parallel|serial] [--parallel N]" >&2
   exit 1
 fi
