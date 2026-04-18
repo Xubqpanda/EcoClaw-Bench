@@ -139,15 +139,17 @@ ensure_ecoclaw_plugin_config() {
   local reduction_pass_html_slimming="${ECOCLAW_REDUCTION_PASS_HTML_SLIMMING:-true}"
   local reduction_pass_exec_output_truncation="${ECOCLAW_REDUCTION_PASS_EXEC_OUTPUT_TRUNCATION:-true}"
   local reduction_pass_agents_startup_optimization="${ECOCLAW_REDUCTION_PASS_AGENTS_STARTUP_OPTIMIZATION:-true}"
-  local reduction_pass_memory_fault_recovery="${ECOCLAW_REDUCTION_PASS_MEMORY_FAULT_RECOVERY:-true}"
   local default_model="${ECOCLAW_MODEL:-ecoclaw/gpt-5.4-mini}"
+  local exec_host="${ECOCLAW_EXEC_HOST:-gateway}"
+  local exec_security="${ECOCLAW_EXEC_SECURITY:-full}"
+  local exec_ask="${ECOCLAW_EXEC_ASK:-off}"
 
   if [[ ! -f "${config_path}" ]]; then
     echo "WARN: openclaw config not found, skip ecoclaw config patch: ${config_path}" >&2
     return 0
   fi
 
-  python3 - "${config_path}" "${proxy_base_url}" "${proxy_api_key}" "${proxy_port}" "${proxy_pure_forward}" "${reduction_trigger_min_chars}" "${reduction_max_tool_chars}" "${reduction_pass_repeated_read_dedup}" "${reduction_pass_tool_payload_trim}" "${reduction_pass_html_slimming}" "${reduction_pass_exec_output_truncation}" "${reduction_pass_agents_startup_optimization}" "${reduction_pass_memory_fault_recovery}" "${default_model}" <<'PATCH_PY'
+  python3 - "${config_path}" "${proxy_base_url}" "${proxy_api_key}" "${proxy_port}" "${proxy_pure_forward}" "${reduction_trigger_min_chars}" "${reduction_max_tool_chars}" "${reduction_pass_repeated_read_dedup}" "${reduction_pass_tool_payload_trim}" "${reduction_pass_html_slimming}" "${reduction_pass_exec_output_truncation}" "${reduction_pass_agents_startup_optimization}" "${default_model}" "${exec_host}" "${exec_security}" "${exec_ask}" <<'PATCH_PY'
 import json
 import os
 import sys
@@ -165,9 +167,11 @@ import sys
     pass_html_slimming_raw,
     pass_exec_output_truncation_raw,
     pass_agents_startup_optimization_raw,
-    pass_memory_fault_recovery_raw,
     default_model,
-) = sys.argv[1:15]
+    exec_host,
+    exec_security,
+    exec_ask,
+) = sys.argv[1:17]
 
 proxy_port = int(proxy_port_raw)
 proxy_pure_forward = str(proxy_pure_forward_raw).strip().lower() in ("1", "true", "yes", "on")
@@ -179,7 +183,6 @@ pass_tool_payload_trim = parse_bool(pass_tool_payload_trim_raw)
 pass_html_slimming = parse_bool(pass_html_slimming_raw)
 pass_exec_output_truncation = parse_bool(pass_exec_output_truncation_raw)
 pass_agents_startup_optimization = parse_bool(pass_agents_startup_optimization_raw)
-pass_memory_fault_recovery = parse_bool(pass_memory_fault_recovery_raw)
 
 with open(config_path, "r", encoding="utf-8") as f:
     cfg = json.load(f)
@@ -228,7 +231,6 @@ passes["toolPayloadTrim"] = pass_tool_payload_trim
 passes["htmlSlimming"] = pass_html_slimming
 passes["execOutputTruncation"] = pass_exec_output_truncation
 passes["agentsStartupOptimization"] = pass_agents_startup_optimization
-passes["memoryFaultRecovery"] = pass_memory_fault_recovery
 pass_options = reduction.setdefault("passOptions", {})
 
 def maybe_apply_json_env(env_name: str, key: str) -> None:
@@ -248,7 +250,6 @@ maybe_apply_json_env("ECOCLAW_REDUCTION_PASS_OPTIONS_TOOL_PAYLOAD_TRIM_JSON", "t
 maybe_apply_json_env("ECOCLAW_REDUCTION_PASS_OPTIONS_HTML_SLIMMING_JSON", "htmlSlimming")
 maybe_apply_json_env("ECOCLAW_REDUCTION_PASS_OPTIONS_EXEC_OUTPUT_TRUNCATION_JSON", "execOutputTruncation")
 maybe_apply_json_env("ECOCLAW_REDUCTION_PASS_OPTIONS_AGENTS_STARTUP_OPTIMIZATION_JSON", "agentsStartupOptimization")
-maybe_apply_json_env("ECOCLAW_REDUCTION_PASS_OPTIONS_MEMORY_FAULT_RECOVERY_JSON", "memoryFaultRecovery")
 maybe_apply_json_env("ECOCLAW_REDUCTION_PASS_OPTIONS_FORMAT_SLIMMING_JSON", "formatSlimming")
 maybe_apply_json_env("ECOCLAW_REDUCTION_PASS_OPTIONS_SEMANTIC_LLMLINGUA2_JSON", "semanticLlmlingua2")
 maybe_apply_json_env("ECOCLAW_REDUCTION_PASS_OPTIONS_FORMAT_CLEANING_JSON", "formatCleaning")
@@ -261,6 +262,15 @@ defaults = agents.setdefault("defaults", {})
 model_defaults = defaults.setdefault("model", {})
 model_defaults["primary"] = default_model
 model_defaults["fallbacks"] = []
+
+tools = cfg.setdefault("tools", {})
+allow = tools.setdefault("allow", [])
+if isinstance(allow, list) and "memory_fault_recover" not in allow:
+    allow.append("memory_fault_recover")
+exec_cfg = tools.setdefault("exec", {})
+exec_cfg["host"] = exec_host
+exec_cfg["security"] = exec_security
+exec_cfg["ask"] = exec_ask
 
 with open(config_path, "w", encoding="utf-8") as f:
     json.dump(cfg, f, indent=2, ensure_ascii=False)
@@ -275,6 +285,9 @@ print(
     f"trim={passes.get('toolPayloadTrim')}",
     f"contextEngineSlot={slots.get('contextEngine')}",
     f"primary={model_defaults.get('primary')}",
+    f"execHost={exec_cfg.get('host')}",
+    f"execSecurity={exec_cfg.get('security')}",
+    f"execAsk={exec_cfg.get('ask')}",
     f"fallbacks={len(model_defaults.get('fallbacks', []))}",
 )
 PATCH_PY
