@@ -26,6 +26,8 @@ from typing import Dict, List, Optional, Any
 
 from lib_agent import (
     cleanup_agent_sessions,
+    _extract_llm_calls_from_transcript,
+    _extract_usage_from_transcript,
     ensure_agent_exists,
     ensure_multi_agent_exists,
     execute_openclaw_task,
@@ -273,6 +275,35 @@ def _parse_args() -> argparse.Namespace:
         help="Path to a JSON file describing agent topology (models, skills, allowAgents per agent). "
         "Overrides --multi-agent-roles when provided.",
     )
+    parser.add_argument(
+        "--session-mode",
+        default=os.environ.get("ECOCLAW_SESSION_MODE", "isolated"),
+        choices=["isolated", "continuous"],
+        help="Transcript/session isolation: isolated (default) or continuous "
+        "(one agent, accumulated history, per-task transcript slicing for grading).",
+    )
+    parser.add_argument(
+        "--max-llm-calls-per-task",
+        type=int,
+        default=int(
+            os.environ.get(
+                "ECOCLAW_MAX_LLM_CALLS_PER_TASK",
+                os.environ.get("PINCHBENCH_MAX_LLM_CALLS_PER_TASK", "60"),
+            )
+        ),
+        help="Hard cap for assistant LLM calls per task (0 disables guard).",
+    )
+    parser.add_argument(
+        "--max-tool-calls-per-task",
+        type=int,
+        default=int(
+            os.environ.get(
+                "ECOCLAW_MAX_TOOL_CALLS_PER_TASK",
+                os.environ.get("PINCHBENCH_MAX_TOOL_CALLS_PER_TASK", "120"),
+            )
+        ),
+        help="Hard cap for tool calls per task (0 disables guard).",
+    )
     return parser.parse_args()
 
 
@@ -294,6 +325,24 @@ def _next_run_id(run_root: Path) -> str:
     return f"{next_id:04d}"
 
 
+def _count_tool_calls_from_transcript(transcript: List[Dict[str, Any]]) -> int:
+    """Count toolCall blocks in assistant message content."""
+    count = 0
+    for entry in transcript:
+        if entry.get("type") != "message":
+            continue
+        message = entry.get("message", {})
+        if not isinstance(message, dict) or message.get("role") != "assistant":
+            continue
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "toolCall":
+                count += 1
+    return count
+
+
 def _run_task_job(
     *,
     task: Task,
@@ -311,6 +360,12 @@ def _run_task_job(
     enable_multi_agent: bool = False,
     multi_agent_roles: Optional[List[str]] = None,
     agent_config: Optional[Dict[str, Any]] = None,
+    session_mode: str = "isolated",
+    agent_id_override: Optional[str] = None,
+    agent_workspace_override: Optional[Path] = None,
+    transcript_start_index: int = 0,
+    max_llm_calls_per_task: int = 0,
+    max_tool_calls_per_task: int = 0,
 ) -> Dict[str, Any]:
     logger.info("\n%s", "=" * 80)
     logger.info(
@@ -325,7 +380,9 @@ def _run_task_job(
     logger.info("%s", "=" * 80)
 
     model_slug = slugify_model(model)
-    agent_workspace = Path(f"/tmp/frontierscience/{run_id}/agent_workspace_j{job_index:04d}")
+    agent_workspace = agent_workspace_override or Path(
+        f"/tmp/frontierscience/{run_id}/agent_workspace_j{job_index:04d}"
+    )
 
     # --- Multi-agent vs single-agent agent setup ---
     multi_agent_ids: Optional[Dict[str, str]] = None
@@ -341,9 +398,10 @@ def _run_task_job(
         )
         agent_id = multi_agent_ids["coordinator"]
     else:
-        agent_id = f"bench-{model_slug}-{run_id}-j{job_index:04d}"
+        agent_id = agent_id_override or f"bench-{model_slug}-{run_id}-j{job_index:04d}"
         ensure_agent_exists(agent_id, model, agent_workspace)
-        cleanup_agent_sessions(agent_id)
+        if session_mode != "continuous":
+            cleanup_agent_sessions(agent_id)
 
     execution_error = None
     try:
@@ -358,6 +416,7 @@ def _run_task_job(
             verbose=verbose,
             enable_multi_agent=enable_multi_agent,
             multi_agent_ids=multi_agent_ids,
+            cleanup_sessions=(session_mode != "continuous"),
         )
     except Exception as exc:
         execution_error = str(exc)
@@ -378,27 +437,79 @@ def _run_task_job(
             "stderr": execution_error,
         }
 
+    transcript_end_index = len(result.get("transcript", []))
+    transcript_slice_start = 0
+    if session_mode == "continuous" and not enable_multi_agent:
+        transcript_slice_start = max(0, min(transcript_start_index, transcript_end_index))
+        sliced_transcript = result.get("transcript", [])[transcript_slice_start:transcript_end_index]
+        result["transcript"] = sliced_transcript
+        result["usage"] = _extract_usage_from_transcript(sliced_transcript)
+        result["llm_calls"] = _extract_llm_calls_from_transcript(sliced_transcript)
+        result["llm_models"] = sorted(
+            {str(call.get("model")) for call in result["llm_calls"] if call.get("model")}
+        )
+
+    llm_call_count = len(result.get("llm_calls", []))
+    tool_call_count = _count_tool_calls_from_transcript(result.get("transcript", []))
+    guard_triggered = False
+    guard_notes: List[str] = []
+    if max_llm_calls_per_task > 0 and llm_call_count > max_llm_calls_per_task:
+        guard_triggered = True
+        guard_notes.append(
+            f"llm_calls={llm_call_count} exceeds max_llm_calls_per_task={max_llm_calls_per_task}"
+        )
+    if max_tool_calls_per_task > 0 and tool_call_count > max_tool_calls_per_task:
+        guard_triggered = True
+        guard_notes.append(
+            f"tool_calls={tool_call_count} exceeds max_tool_calls_per_task={max_tool_calls_per_task}"
+        )
+
+    if guard_triggered:
+        note = "; ".join(guard_notes)
+        logger.warning(
+            "Guard triggered for %s (job %s): %s",
+            task.task_id,
+            job_index,
+            note,
+        )
+        result["status"] = "error"
+        result["stderr"] = f"{result.get('stderr', '').strip()}\nGuard triggered: {note}".strip()
+        result["transcript"] = []
+        result["llm_calls"] = []
+        result["llm_models"] = []
+        result["usage"] = {}
+
     judge_agent_prefix = f"bench-judge-{run_id}-j{job_index:04d}"
-    try:
-        grade_kwargs = dict(task=task, execution_result=result, skill_dir=skill_dir, verbose=verbose)
-        if judge_model:
-            grade_kwargs["judge_model"] = judge_model
-        grade_kwargs["judge_agent_prefix"] = judge_agent_prefix
-        grade = grade_task(**grade_kwargs)
-    except Exception as exc:
-        if execution_error:
-            note = f"Execution failed: {execution_error}; Grading failed: {exc}"
-        else:
-            note = f"Grading failed: {exc}"
-        logger.warning("Task grading failed for %s, continuing: %s", task.task_id, exc)
+    if guard_triggered:
         grade = GradeResult(
             task_id=task.task_id,
             score=0.0,
             max_score=1.0,
             grading_type=task.grading_type,
             breakdown={},
-            notes=note,
+            notes=f"Guard triggered: {'; '.join(guard_notes)}",
         )
+    else:
+        try:
+            grade_kwargs = dict(task=task, execution_result=result, skill_dir=skill_dir, verbose=verbose)
+            if judge_model:
+                grade_kwargs["judge_model"] = judge_model
+            grade_kwargs["judge_agent_prefix"] = judge_agent_prefix
+            grade = grade_task(**grade_kwargs)
+        except Exception as exc:
+            if execution_error:
+                note = f"Execution failed: {execution_error}; Grading failed: {exc}"
+            else:
+                note = f"Grading failed: {exc}"
+            logger.warning("Task grading failed for %s, continuing: %s", task.task_id, exc)
+            grade = GradeResult(
+                task_id=task.task_id,
+                score=0.0,
+                max_score=1.0,
+                grading_type=task.grading_type,
+                breakdown={},
+                notes=note,
+            )
 
     score_pct = grade.score / grade.max_score * 100 if grade.max_score > 0 else 0
     status_emoji = "✅" if grade.score >= grade.max_score else "⚠️" if grade.score > 0 else "❌"
@@ -418,6 +529,18 @@ def _run_task_job(
         "task_id": task.task_id,
         "task_index": task_index,
         "run_index": run_index,
+        "agent_id": result.get("agent_id", ""),
+        "transcript_span": {
+            "mode": session_mode,
+            "start": transcript_slice_start,
+            "end": transcript_end_index,
+            "length": max(0, transcript_end_index - transcript_slice_start),
+        },
+        "call_counts": {
+            "llm_calls": llm_call_count,
+            "tool_calls": tool_call_count,
+            "guard_triggered": guard_triggered,
+        },
         "result": result,
         "grade": grade,
     }
@@ -628,7 +751,7 @@ def _log_category_summary(
     task_entries: List[Dict[str, Any]],
     tasks_by_id: Dict[str, Any],
 ) -> None:
-    """Log a summary grouped by category, matching the frontierscience website format."""
+    """Log a summary grouped by category, matching the benchmark website format."""
     # Group scores by category
     category_scores: Dict[str, Dict[str, float]] = {}
     
@@ -656,7 +779,7 @@ def _log_category_summary(
     overall_pct = (total_earned / total_possible * 100) if total_possible > 0 else 0
     
     logger.info("\n%s", "=" * 80)
-    logger.info("🔬 FRONTIERSCIENCE SCORE SUMMARY")
+    logger.info("🐾 CLAW_EVAL SCORE SUMMARY")
     logger.info("%s", "=" * 80)
     logger.info("")
     logger.info("   Overall Score: %.1f%% (%.1f / %.1f)", overall_pct, total_earned, total_possible)
@@ -765,6 +888,13 @@ def main():
     if parallel_jobs != args.parallel:
         logger.warning("Invalid --parallel=%s, falling back to %s", args.parallel, parallel_jobs)
     logger.info("Parallel isolated jobs: %s", parallel_jobs)
+    session_mode = args.session_mode
+    logger.info("Session mode: %s", session_mode)
+    logger.info(
+        "Per-task call guards: max_llm_calls=%s, max_tool_calls=%s",
+        args.max_llm_calls_per_task,
+        args.max_tool_calls_per_task,
+    )
 
     # Multi-agent settings
     enable_multi_agent = args.enable_multi_agent
@@ -795,8 +925,14 @@ def main():
             multi_agent_roles = [r.strip() for r in roles_str.split(",") if r.strip()]
             logger.info("Multi-agent mode ENABLED. Roles: %s", multi_agent_roles)
 
+    if session_mode == "continuous" and parallel_jobs != 1:
+        logger.error("--session-mode continuous requires --parallel 1")
+        sys.exit(2)
+    if session_mode == "continuous" and enable_multi_agent:
+        logger.error("--session-mode continuous is only supported in single-agent mode")
+        sys.exit(2)
+
     task_ids = _select_task_ids(runner.tasks, args.suite)
-    results = []
     grades_by_task_id = {}
 
     tasks_to_run = runner.tasks
@@ -822,7 +958,21 @@ def main():
     logger.info("Scheduling %s total task runs", len(jobs))
     completed_jobs: List[Dict[str, Any]] = []
     if parallel_jobs == 1:
+        transcript_cursor_by_agent: Dict[str, int] = {}
+        continuous_agent_id: Optional[str] = None
+        continuous_agent_workspace: Optional[Path] = None
+        if session_mode == "continuous":
+            continuous_agent_id = f"bench-{model_slug}-{run_id}-serial"
+            continuous_agent_workspace = Path(f"/tmp/frontierscience/{run_id}/agent_workspace_serial")
+            ensure_agent_exists(continuous_agent_id, args.model, continuous_agent_workspace)
+            cleanup_agent_sessions(continuous_agent_id)
+            transcript_cursor_by_agent[continuous_agent_id] = 0
         for job in jobs:
+            agent_id_override = continuous_agent_id if session_mode == "continuous" else None
+            workspace_override = continuous_agent_workspace if session_mode == "continuous" else None
+            transcript_start = 0
+            if agent_id_override:
+                transcript_start = transcript_cursor_by_agent.get(agent_id_override, 0)
             completed_jobs.append(
                 _run_task_job(
                     task=job["task"],
@@ -840,8 +990,20 @@ def main():
                     enable_multi_agent=enable_multi_agent,
                     multi_agent_roles=multi_agent_roles,
                     agent_config=agent_config,
+                    session_mode=session_mode,
+                    agent_id_override=agent_id_override,
+                    agent_workspace_override=workspace_override,
+                    transcript_start_index=transcript_start,
+                    max_llm_calls_per_task=args.max_llm_calls_per_task,
+                    max_tool_calls_per_task=args.max_tool_calls_per_task,
                 )
             )
+            if agent_id_override and completed_jobs:
+                latest = completed_jobs[-1]
+                span = latest.get("transcript_span", {})
+                transcript_cursor_by_agent[agent_id_override] = int(
+                    span.get("end", transcript_cursor_by_agent.get(agent_id_override, 0))
+                )
     else:
         with ThreadPoolExecutor(max_workers=parallel_jobs) as executor:
             futures = {
@@ -862,6 +1024,9 @@ def main():
                     enable_multi_agent=enable_multi_agent,
                     multi_agent_roles=multi_agent_roles,
                     agent_config=agent_config,
+                    session_mode=session_mode,
+                    max_llm_calls_per_task=args.max_llm_calls_per_task,
+                    max_tool_calls_per_task=args.max_tool_calls_per_task,
                 ): job
                 for job in jobs
             }
@@ -885,6 +1050,13 @@ def main():
                             "task_id": task.task_id,
                             "task_index": job["task_index"],
                             "run_index": job["run_index"],
+                            "agent_id": "",
+                            "transcript_span": {
+                                "mode": session_mode,
+                                "start": 0,
+                                "end": 0,
+                                "length": 0,
+                            },
                             "result": {
                                 "agent_id": "",
                                 "task_id": task.task_id,
@@ -905,7 +1077,6 @@ def main():
                     )
 
     completed_jobs.sort(key=lambda item: (int(item["task_index"]), int(item["run_index"])))
-    results = [job["result"] for job in completed_jobs]
 
     for i, task in enumerate(tasks_to_run, 1):
         task_runs = [job for job in completed_jobs if job["task_id"] == task.task_id]
@@ -931,25 +1102,30 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    task_entries = [
-        {
-            "task_id": result["task_id"],
-            "status": result["status"],
-            "timed_out": result["timed_out"],
-            "execution_time": result["execution_time"],
-            "transcript_length": len(result["transcript"]),
-            "transcript": result["transcript"],
-            "llm_calls": result.get("llm_calls", []),
-            "llm_models": result.get("llm_models", []),
-            "usage": result.get("usage", {}),
-            "workspace": result["workspace"],
-            "stdout": result.get("stdout", ""),
-            "stderr": result.get("stderr", ""),
-            "grading": grades_by_task_id[result["task_id"]],
-            "frontmatter": tasks_by_id[result["task_id"]].frontmatter,
-        }
-        for result in results
-    ]
+    task_entries = []
+    for job in completed_jobs:
+        result = job["result"]
+        task_entries.append(
+            {
+                "task_id": result["task_id"],
+                "status": result["status"],
+                "timed_out": result["timed_out"],
+                "execution_time": result["execution_time"],
+                "transcript_length": len(result["transcript"]),
+                "transcript": result["transcript"],
+                "transcript_span": job.get("transcript_span", {}),
+                "call_counts": job.get("call_counts", {}),
+                "llm_calls": result.get("llm_calls", []),
+                "llm_models": result.get("llm_models", []),
+                "usage": result.get("usage", {}),
+                "workspace": result["workspace"],
+                "agent_id": job.get("agent_id") or result.get("agent_id", ""),
+                "stdout": result.get("stdout", ""),
+                "stderr": result.get("stderr", ""),
+                "grading": grades_by_task_id[result["task_id"]],
+                "frontmatter": tasks_by_id[result["task_id"]].frontmatter,
+            }
+        )
 
     efficiency = _compute_efficiency_summary(task_entries, grades_by_task_id)
 
@@ -960,6 +1136,10 @@ def main():
         "timestamp": time.time(),
         "suite": args.suite,
         "runs_per_task": runs_per_task,
+        "parallel": parallel_jobs,
+        "session_mode": session_mode,
+        "max_llm_calls_per_task": args.max_llm_calls_per_task,
+        "max_tool_calls_per_task": args.max_tool_calls_per_task,
         "enable_multi_agent": enable_multi_agent,
         "multi_agent_roles": multi_agent_roles,
         "agent_config_path": agent_config_path if agent_config else None,

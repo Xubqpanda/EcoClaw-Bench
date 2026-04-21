@@ -675,6 +675,7 @@ def execute_openclaw_task(
     verbose: bool = False,
     enable_multi_agent: bool = False,
     multi_agent_ids: Dict[str, str] | None = None,
+    cleanup_sessions: bool = True,
 ) -> Dict[str, Any]:
     logger.info("🤖 Agent [%s] starting task: %s", agent_id, task.task_id)
     logger.info("   Task: %s", task.name)
@@ -688,10 +689,13 @@ def execute_openclaw_task(
 
     # Clean up previous session transcripts so we can reliably find this task's
     # transcript (OpenClaw uses its own UUID-based naming, not our session ID).
-    if enable_multi_agent and multi_agent_ids:
-        cleanup_multi_agent_sessions(multi_agent_ids)
-    else:
-        cleanup_agent_sessions(agent_id)
+    # In continuous-session mode we intentionally preserve history and let the
+    # caller slice per-task transcript ranges.
+    if cleanup_sessions:
+        if enable_multi_agent and multi_agent_ids:
+            cleanup_multi_agent_sessions(multi_agent_ids)
+        else:
+            cleanup_agent_sessions(agent_id)
 
     start_time = time.time()
     workspace = prepare_task_workspace(
@@ -780,7 +784,8 @@ def execute_openclaw_task(
             "Empty transcript for %s; retrying task execution once (session sync fallback).",
             task.task_id,
         )
-        cleanup_agent_sessions(agent_id)
+        if cleanup_sessions:
+            cleanup_agent_sessions(agent_id)
         retry_session_id = f"{session_id}_retry"
         retry_started_at = time.time()
         retry_stdout, retry_stderr, retry_exit_code, retry_timed_out = _run_once(
@@ -806,7 +811,8 @@ def execute_openclaw_task(
             retry_reason,
         )
         time.sleep(1.5)
-        cleanup_agent_sessions(agent_id)
+        if cleanup_sessions:
+            cleanup_agent_sessions(agent_id)
         retry_session_id = f"{session_id}_provider_retry"
         retry_started_at = time.time()
         retry_stdout, retry_stderr, retry_exit_code, retry_timed_out = _run_once(

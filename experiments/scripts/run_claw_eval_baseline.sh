@@ -5,6 +5,23 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=common.sh
 source "${SCRIPT_DIR}/common.sh"
 
+# Ensure nvm is loaded for openclaw CLI
+REAL_USER_HOME="$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f6)"
+if [[ -z "${REAL_USER_HOME}" ]]; then
+  REAL_USER_HOME="${HOME}"
+fi
+export NVM_DIR="${NVM_DIR:-${REAL_USER_HOME}/.nvm}"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+nvm use 22 >/dev/null 2>&1 || true
+if command -v nvm >/dev/null 2>&1; then
+  NVM_NODE_PATH="$(nvm which 22 2>/dev/null || true)"
+  if [[ -n "${NVM_NODE_PATH}" && "${NVM_NODE_PATH}" != "N/A" ]]; then
+    NVM_NODE_BIN="$(dirname "${NVM_NODE_PATH}")"
+    export PATH="${NVM_NODE_BIN}:${PATH}"
+    hash -r
+  fi
+fi
+
 MODEL=""
 JUDGE=""
 SUITE=""
@@ -14,6 +31,10 @@ PARALLEL=""
 ENABLE_MULTI_AGENT=0
 MULTI_AGENT_ROLES=""
 AGENT_CONFIG=""
+TASKS_SUBDIR=""
+TASKS_DIR=""
+CLEAN_RUNTIME=0
+CLEAN_HOME_DIR=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -26,6 +47,10 @@ while [[ $# -gt 0 ]]; do
     --enable-multi-agent) ENABLE_MULTI_AGENT=1; shift ;;
     --multi-agent-roles) MULTI_AGENT_ROLES="${2:-}"; shift 2 ;;
     --agent-config) AGENT_CONFIG="${2:-}"; shift 2 ;;
+    --tasks-subdir) TASKS_SUBDIR="${2:-}"; shift 2 ;;
+    --tasks-dir) TASKS_DIR="${2:-}"; shift 2 ;;
+    --clean-runtime) CLEAN_RUNTIME=1; shift ;;
+    --clean-home-dir) CLEAN_HOME_DIR="${2:-}"; shift 2 ;;
     *)
       echo "Unknown argument: $1" >&2
       exit 1
@@ -34,6 +59,25 @@ while [[ $# -gt 0 ]]; do
 done
 
 import_dotenv
+
+if [[ "${CLEAN_RUNTIME}" == "1" ]]; then
+  if [[ -z "${CLEAN_HOME_DIR}" ]]; then
+    CLEAN_HOME_DIR="/tmp/openclaw_clean_claw_eval_baseline"
+  fi
+  export ECOCLAW_OPENCLAW_HOME="${CLEAN_HOME_DIR}"
+  # Re-normalize HOME/XDG dirs after overriding runtime home.
+  normalize_openclaw_runtime_env
+  CLEAN_OPENCLAW_DIR="${HOME}/.openclaw"
+  CLEAN_OPENCLAW_CONFIG="${CLEAN_OPENCLAW_DIR}/openclaw.json"
+  REAL_OPENCLAW_CONFIG="${REAL_USER_HOME}/.openclaw/openclaw.json"
+  if [[ ! -f "${CLEAN_OPENCLAW_CONFIG}" && -f "${REAL_OPENCLAW_CONFIG}" ]]; then
+    mkdir -p "${CLEAN_OPENCLAW_DIR}"
+    cp "${REAL_OPENCLAW_CONFIG}" "${CLEAN_OPENCLAW_CONFIG}"
+    echo "Bootstrapped clean runtime config from: ${REAL_OPENCLAW_CONFIG}"
+  fi
+  echo "Using clean OpenClaw runtime home: ${ECOCLAW_OPENCLAW_HOME}"
+fi
+
 apply_ecoclaw_env
 ensure_openclaw_gateway_running
 recover_stale_openclaw_config_backup
@@ -52,6 +96,16 @@ restore_ecoclaw_plugin() {
 trap restore_ecoclaw_plugin EXIT
 
 openclaw plugins disable ecoclaw >/dev/null 2>&1 || true
+# For strict baseline, disable helper plugins that can inject memory/bootstrap behavior.
+openclaw config set plugins.entries.baseline-hooks.enabled false >/dev/null 2>&1 || true
+openclaw config set plugins.entries.lycheemem-tools.enabled false >/dev/null 2>&1 || true
+openclaw config set plugins.entries.openspace-tools.enabled false >/dev/null 2>&1 || true
+openclaw config set plugins.entries.lossless-claw.enabled false >/dev/null 2>&1 || true
+# Disable internal token hooks that can create SOUL/USER/MEMORY bootstrap flows.
+openclaw config set hooks.internal.entries.token-context.enabled false >/dev/null 2>&1 || true
+openclaw config set hooks.internal.entries.token-heartbeat.enabled false >/dev/null 2>&1 || true
+openclaw gateway restart >/dev/null 2>&1 || true
+sleep 2
 
 if [[ -z "${ECOCLAW_SKILL_DIR:-}" && -d "${REPO_ROOT}/claw-eval-skill" ]]; then
   export ECOCLAW_SKILL_DIR="${REPO_ROOT}/claw-eval-skill"
@@ -127,8 +181,39 @@ restore_ecoclaw_plugin() {
 }
 trap restore_ecoclaw_plugin EXIT
 
+# Resolve and validate tasks directory
+if [[ -n "${TASKS_DIR}" && -n "${TASKS_SUBDIR}" ]]; then
+  echo "Please set only one of --tasks-dir or --tasks-subdir" >&2
+  exit 1
+fi
+
+SKILL_DIR="$(resolve_skill_dir)"
+if [[ -n "${TASKS_DIR}" ]]; then
+  RESOLVED_TASKS_DIR="${TASKS_DIR}"
+elif [[ -n "${TASKS_SUBDIR}" ]]; then
+  RESOLVED_TASKS_DIR="${SKILL_DIR}/tasks/${TASKS_SUBDIR}"
+else
+  RESOLVED_TASKS_DIR="${SKILL_DIR}/tasks"
+fi
+
+if [[ ! -d "${RESOLVED_TASKS_DIR}" ]]; then
+  echo "Tasks directory not found: ${RESOLVED_TASKS_DIR}" >&2
+  exit 1
+fi
+
+echo "Resolved benchmark config:"
+echo "  tasks_dir=${RESOLVED_TASKS_DIR}"
+echo "  suite=${RESOLVED_SUITE}"
+echo "  parallel=${RESOLVED_PARALLEL}"
+echo "  runs=${RESOLVED_RUNS}"
+echo "  model=${RESOLVED_MODEL}"
+if [[ -n "${ECOCLAW_SUITE:-}" && -z "${SUITE}" ]]; then
+  echo "  note: suite comes from ECOCLAW_SUITE=${ECOCLAW_SUITE}"
+fi
+
 # Build benchmark.py arguments
 BENCH_ARGS=(
+  --tasks-dir "${RESOLVED_TASKS_DIR}"
   --model "${RESOLVED_MODEL}"
   --judge "${RESOLVED_JUDGE}"
   --suite "${RESOLVED_SUITE}"
@@ -147,7 +232,6 @@ if [[ "${ENABLE_MULTI_AGENT}" == "1" ]]; then
   fi
 fi
 
-SKILL_DIR="$(resolve_skill_dir)"
 cd "${SKILL_DIR}"
 uv run scripts/benchmark.py "${BENCH_ARGS[@]}" \
   2>&1 | tee "${RUN_LOG_FILE}"

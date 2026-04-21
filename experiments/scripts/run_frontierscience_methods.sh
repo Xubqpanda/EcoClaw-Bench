@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
 # ──────────────────────────────────────────────────────────────────────────────
-# EcoClaw Ablation Runner
+# EcoClaw Ablation Runner — FrontierScience
 #
-# Runs PinchBench with exactly ONE EcoClaw module enabled (or none for baseline).
-# Results go to results/raw/pinchbench/<label>/ for later comparison.
+# Runs FrontierScience with exactly ONE EcoClaw module enabled (or none for baseline).
+# Results go to results/raw/frontierscience/<label>/ for later comparison.
 #
 # Usage:
-#   ./experiments/scripts/run_pinchbench_methods.sh --label baseline
-#   ./experiments/scripts/run_pinchbench_methods.sh --label baseline --execution-mode serial
-#   ./experiments/scripts/run_pinchbench_methods.sh --label qmd-only
-#   ./experiments/scripts/run_pinchbench_methods.sh --label ccr-only
-#   ./experiments/scripts/run_pinchbench_methods.sh --label llmlingua-only
-#   ./experiments/scripts/run_pinchbench_methods.sh --label selctx-only
-#   ./experiments/scripts/run_pinchbench_methods.sh --label tokenqrusher-only
-#   ./experiments/scripts/run_pinchbench_methods.sh --label concise-only
+#   ./experiments/scripts/run_frontierscience_methods.sh --label baseline
+#   ./experiments/scripts/run_frontierscience_methods.sh --label baseline --execution-mode serial
+#   ./experiments/scripts/run_frontierscience_methods.sh --label qmd-only
+#   ./experiments/scripts/run_frontierscience_methods.sh --label ccr-only
+#   ./experiments/scripts/run_frontierscience_methods.sh --label llmlingua-only
+#   ./experiments/scripts/run_frontierscience_methods.sh --label selctx-only
+#   ./experiments/scripts/run_frontierscience_methods.sh --label tokenqrusher-only
+#   ./experiments/scripts/run_frontierscience_methods.sh --label concise-only
 #
-# Or run all 6 in sequence:
-#   ./experiments/scripts/run_pinchbench_methods.sh --all
+# Or run all in sequence:
+#   ./experiments/scripts/run_frontierscience_methods.sh --all
 # ──────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -53,7 +53,7 @@ while [[ $# -gt 0 ]]; do
     --execution-mode) EXECUTION_MODE="${2:-}"; shift 2 ;;
     *)
       echo "Unknown argument: $1" >&2
-      echo "Usage: $0 --label <baseline|prefix-cache|qmd-only|qmd-vsearch|qmd-query|ccr-only|llmlingua-only|selctx-only|tokenqrusher-only|concise-only|slim-prompt|concise-slim|lycheemem|compaction|compaction-lcm|openspace-cold|openspace-hot|openspace-compaction>" >&2
+      echo "Usage: $0 --label <baseline|prefix-cache|qmd-only|...>" >&2
       echo "       $0 --all [--execution-mode parallel|serial] [--parallel N]" >&2
       exit 1
       ;;
@@ -69,7 +69,7 @@ MODEL_LIKE="${MODEL:-${ECOCLAW_MODEL:-dmx/gpt-5.4-mini}}"
 JUDGE_LIKE="${JUDGE:-${ECOCLAW_JUDGE:-dmx/gpt-5.4-mini}}"
 RESOLVED_MODEL="$(resolve_model_alias "${MODEL_LIKE}")"
 RESOLVED_JUDGE="$(resolve_model_alias "${JUDGE_LIKE}")"
-RESOLVED_SUITE="${SUITE:-${ECOCLAW_SUITE:-automated-only}}"
+RESOLVED_SUITE="${SUITE:-${ECOCLAW_SUITE:-all}}"
 RESOLVED_RUNS="${RUNS:-${ECOCLAW_RUNS:-1}}"
 RESOLVED_TIMEOUT="${TIMEOUT_MULTIPLIER:-${ECOCLAW_TIMEOUT_MULTIPLIER:-1.0}}"
 RESOLVED_PARALLEL="${PARALLEL:-${ECOCLAW_PARALLEL:-1}}"
@@ -79,8 +79,6 @@ case "${RESOLVED_EXECUTION_MODE}" in
     RESOLVED_SESSION_MODE="isolated"
     ;;
   serial)
-    # Serial mode means sequential execution with transcript accumulation +
-    # per-task transcript slicing in benchmark.py.
     RESOLVED_PARALLEL=1
     RESOLVED_SESSION_MODE="continuous"
     ;;
@@ -91,11 +89,11 @@ case "${RESOLVED_EXECUTION_MODE}" in
     ;;
 esac
 
-# PinchBench code + tasks + assets: this repo copy (not external EcoClaw/skill).
-PINCHBENCH_ROOT="${REPO_ROOT}/experiments/dataset/pinchbench"
-PINCHBENCH_BENCHMARK_PY="${PINCHBENCH_ROOT}/scripts/benchmark.py"
-if [[ ! -f "${PINCHBENCH_BENCHMARK_PY}" ]]; then
-  printf 'PinchBench benchmark not found: %s\n' "${PINCHBENCH_BENCHMARK_PY}" >&2
+# FrontierScience code + tasks + assets
+FRONTIERSCIENCE_ROOT="${REPO_ROOT}/experiments/dataset/frontierscience"
+FRONTIERSCIENCE_BENCHMARK_PY="${FRONTIERSCIENCE_ROOT}/scripts/benchmark.py"
+if [[ ! -f "${FRONTIERSCIENCE_BENCHMARK_PY}" ]]; then
+  printf 'FrontierScience benchmark not found: %s\n' "${FRONTIERSCIENCE_BENCHMARK_PY}" >&2
   exit 1
 fi
 
@@ -148,14 +146,12 @@ run_single() {
     llmlingua-only)     export ECOCLAW_ENABLE_LLMLINGUA=1 ;;
     selctx-only)        export ECOCLAW_ENABLE_SELCTX=1 ;;
     tokenqrusher-only)
-      # OpenClaw hooks from ClawHub (token-context + token-heartbeat), not ECOCLAW baseline-hooks
       "${SCRIPT_DIR}/enable_tokenqrusher_hooks.sh"
       ;;
     concise-only)       export ECOCLAW_ENABLE_CONCISE=1 ;;
     slim-prompt)        export ECOCLAW_ENABLE_SLIM_PROMPT=1 ;;
     concise-slim)       export ECOCLAW_ENABLE_CONCISE=1; export ECOCLAW_ENABLE_SLIM_PROMPT=1 ;;
     lycheemem)
-      # Enable LycheeMem plugin, disable other memory/compaction methods
       openclaw config set plugins.entries.lycheemem-tools.enabled true 2>/dev/null || true
       openclaw config set plugins.entries.lossless-claw.enabled false 2>/dev/null || true
       openclaw config set agents.defaults.compaction.mode default 2>/dev/null || true
@@ -163,38 +159,30 @@ run_single() {
       sleep 3
       ;;
     compaction)
-      # Enable safeguard compaction, disable lossless-claw
       openclaw config set agents.defaults.compaction.mode safeguard 2>/dev/null || true
       openclaw config set plugins.entries.lossless-claw.enabled false 2>/dev/null || true
       openclaw gateway restart 2>/dev/null || true
       sleep 3
       ;;
     compaction-lcm)
-      # Enable safeguard compaction + lossless-claw
       openclaw config set agents.defaults.compaction.mode safeguard 2>/dev/null || true
       openclaw config set plugins.entries.lossless-claw.enabled true 2>/dev/null || true
       openclaw gateway restart 2>/dev/null || true
       sleep 3
       ;;
     openspace|openspace-cold)
-      # OpenSpace Phase 1 — cold start: agent delegates ALL tasks via execute_task
-      # so OpenSpace's internal agent runs them and captures skills into the registry.
       start_openspace_server cold
       register_openspace_plugin
       openclaw gateway restart 2>/dev/null || true
       sleep 3
       ;;
     openspace-hot)
-      # OpenSpace Phase 2 — hot rerun: skill library is pre-populated from a cold run.
-      # Agent searches first (search_skills), then follows or delegates via execute_task.
-      # Run openspace-cold first to populate the skill library before using this label.
       start_openspace_server hot
       register_openspace_plugin
       openclaw gateway restart 2>/dev/null || true
       sleep 3
       ;;
     openspace-compaction)
-      # OpenSpace + safeguard compaction
       start_openspace_server
       register_openspace_plugin
       openclaw config set agents.defaults.compaction.mode safeguard 2>/dev/null || true
@@ -204,12 +192,10 @@ run_single() {
       ;;
     *)
       echo "Unknown label: ${label}" >&2
-      echo "Valid labels: baseline, prefix-cache, qmd-only, qmd-vsearch, qmd-query, ccr-only, llmlingua-only, selctx-only, tokenqrusher-only, concise-only, slim-prompt, concise-slim, lycheemem, compaction, compaction-lcm, openspace, openspace-compaction" >&2
       return 1
       ;;
   esac
 
-  # For baseline / tokenqrusher: ensure compaction is in default mode and all extra plugins disabled
   if [[ "${label}" == "baseline" || "${label}" == "tokenqrusher-only" ]]; then
     openclaw config set agents.defaults.compaction.mode default 2>/dev/null || true
     openclaw config set plugins.entries.lossless-claw.enabled false 2>/dev/null || true
@@ -218,31 +204,30 @@ run_single() {
     sleep 3
   fi
 
-  # tokenQrusher hooks: always tear down when this run ends (success, failure, or interrupt).
   if [[ "${label}" == "tokenqrusher-only" ]]; then
-    _tokenqrusher_pinchbench_cleanup() {
+    _tokenqrusher_frontierscience_cleanup() {
       "${SCRIPT_DIR}/disable_tokenqrusher_hooks.sh" || true
     }
-    trap _tokenqrusher_pinchbench_cleanup EXIT INT TERM
+    trap _tokenqrusher_frontierscience_cleanup EXIT INT TERM
   fi
 
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo "  🧪 Ablation: ${label}"
+  echo "  🧪 Ablation [frontierscience]: ${label}"
   echo "  Model: ${RESOLVED_MODEL}"
   echo "  PREFIX_CACHE=${ECOCLAW_ENABLE_PREFIX_CACHE}  QMD=${ECOCLAW_ENABLE_QMD}  CCR=${ECOCLAW_ENABLE_CCR}"
   echo "  LLMLINGUA=${ECOCLAW_ENABLE_LLMLINGUA}  SELCTX=${ECOCLAW_ENABLE_SELCTX}"
   echo "  CONCISE=${ECOCLAW_ENABLE_CONCISE}  SLIM_PROMPT=${ECOCLAW_ENABLE_SLIM_PROMPT}"
   echo "  Execution Mode=${RESOLVED_EXECUTION_MODE}  Parallel=${RESOLVED_PARALLEL}  SessionMode=${RESOLVED_SESSION_MODE}"
-  echo "  PinchBench: ${PINCHBENCH_ROOT}"
+  echo "  FrontierScience: ${FRONTIERSCIENCE_ROOT}"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
 
-  local output_dir="${REPO_ROOT}/results/raw/pinchbench/${label}"
+  local output_dir="${REPO_ROOT}/results/raw/frontierscience/${label}"
   mkdir -p "${output_dir}"
 
-  cd "${PINCHBENCH_ROOT}"
-  uv run "${PINCHBENCH_BENCHMARK_PY}" \
+  cd "${FRONTIERSCIENCE_ROOT}"
+  uv run "${FRONTIERSCIENCE_BENCHMARK_PY}" \
     --model "${RESOLVED_MODEL}" \
     --judge "${RESOLVED_JUDGE}" \
     --suite "${RESOLVED_SUITE}" \
@@ -262,7 +247,6 @@ run_single() {
     "${SCRIPT_DIR}/disable_tokenqrusher_hooks.sh" || true
   fi
 
-  # Auto-cleanup: disable gateway-level plugins after each run
   case "${label}" in
     lycheemem|compaction|compaction-lcm|baseline)
       reset_gateway_plugins
@@ -278,19 +262,18 @@ run_single() {
 ALL_LABELS=(baseline prefix-cache qmd-only qmd-vsearch qmd-query ccr-only llmlingua-only selctx-only tokenqrusher-only concise-only slim-prompt concise-slim lycheemem compaction compaction-lcm openspace-cold openspace-hot openspace-compaction)
 
 if [[ "${RUN_ALL}" == "true" ]]; then
-  echo "Running all ${#ALL_LABELS[@]} ablation experiments..."
+  echo "Running all ${#ALL_LABELS[@]} ablation experiments on frontierscience..."
   for lbl in "${ALL_LABELS[@]}"; do
     run_single "${lbl}"
   done
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo "  🎉 All ${#ALL_LABELS[@]} ablation runs complete!"
-  echo "  Run compare_pinchbench_ablation.sh to generate the comparison report."
+  echo "  🎉 All ${#ALL_LABELS[@]} ablation runs complete (frontierscience)!"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 elif [[ -n "${LABEL}" ]]; then
   run_single "${LABEL}"
 else
-  echo "Usage: $0 --label <baseline|prefix-cache|qmd-only|qmd-vsearch|qmd-query|ccr-only|llmlingua-only|selctx-only|tokenqrusher-only|concise-only|slim-prompt|concise-slim|lycheemem|compaction|compaction-lcm|openspace-cold|openspace-hot|openspace-compaction>" >&2
+  echo "Usage: $0 --label <baseline|prefix-cache|qmd-only|...>" >&2
   echo "       $0 --all [--execution-mode parallel|serial] [--parallel N]" >&2
   exit 1
 fi

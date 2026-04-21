@@ -294,6 +294,21 @@ def _format_grading_criteria(task: Task) -> str:
     return "\n".join(f"- {criterion}" for criterion in task.grading_criteria)
 
 
+def _text_blocks_from_content(content: Any) -> List[str]:
+    """Collect OpenClaw `type: text` blocks from a message content list."""
+    if not isinstance(content, list):
+        return []
+    out: List[str] = []
+    for item in content:
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") == "text":
+            t = item.get("text", "")
+            if isinstance(t, str) and t.strip():
+                out.append(t)
+    return out
+
+
 def _summarize_transcript(transcript: List[Dict[str, Any]]) -> str:
     summary_parts: List[str] = []
     for event in transcript:
@@ -301,20 +316,26 @@ def _summarize_transcript(transcript: List[Dict[str, Any]]) -> str:
             continue
         msg = event.get("message", {})
         role = msg.get("role")
+        content = msg.get("content", [])
         if role == "assistant":
-            for item in msg.get("content", []):
-                if item.get("type") == "toolCall":
+            for item in content:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("type") == "text":
+                    summary_parts.append(f"Assistant: {item.get('text', '')}")
+                elif item.get("type") == "toolCall":
                     summary_parts.append(
                         f"Tool: {item.get('name')}({json.dumps(item.get('arguments', {}))})"
                     )
         elif role == "toolResult":
-            content = msg.get("content", [])
             if content:
                 result_preview = str(content[0])[:200]
                 summary_parts.append(f"Result: {result_preview}")
         elif role == "user":
-            content = msg.get("content", [])
-            if content:
+            texts = _text_blocks_from_content(content)
+            if texts:
+                summary_parts.append("User: " + "\n".join(texts))
+            elif content:
                 summary_parts.append(f"User: {content[0]}")
     return "\n".join(summary_parts)
 

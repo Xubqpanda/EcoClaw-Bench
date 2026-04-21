@@ -6,11 +6,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/common.sh"
 
 MODEL="${MODEL:-ecoclaw/gpt-5.4}"
-JUDGE="${JUDGE:-gmn/gpt-5.4}"
+JUDGE="${JUDGE:-ecoclaw/gpt-5.4}"
 RUNS="${RUNS:-1}"
 PARALLEL="${PARALLEL:-1}"
 TIMEOUT_MULTIPLIER="${TIMEOUT_MULTIPLIER:-1.0}"
-ECOCLAW_PLUGIN_PATH="${ECOCLAW_PLUGIN_PATH:-/mnt/20t/xubuqiang/EcoClaw/EcoClaw/packages/openclaw-plugin}"
+_default_plugin="${REPO_ROOT}/EcoClaw/packages/openclaw-plugin"
+if [[ -z "${ECOCLAW_PLUGIN_PATH:-}" ]]; then
+  if [[ -d "${_default_plugin}" ]]; then
+    ECOCLAW_PLUGIN_PATH="${_default_plugin}"
+  fi
+fi
 
 import_dotenv
 apply_ecoclaw_env
