@@ -5,7 +5,7 @@ unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY all_proxy
 export HOME=/mnt/20t/xubuqiang
 
 export ECOCLAW_BASE_URL='https://kuaipao.ai/v1'
-export ECOCLAW_API_KEY='sk-Nf0gcBreOAX9tt0ruwccdpGXyDydIHHXat9e52HByWqLH40g'
+export ECOCLAW_API_KEY=''
 export ECOCLAW_MODEL='ecoclaw/gpt-5.4-mini'
 export ECOCLAW_JUDGE='ecoclaw/gpt-5.4-mini'
 
