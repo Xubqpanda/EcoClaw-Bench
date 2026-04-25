@@ -144,7 +144,6 @@ ensure_ecoclaw_plugin_config() {
   local exec_host="${ECOCLAW_EXEC_HOST:-gateway}"
   local exec_security="${ECOCLAW_EXEC_SECURITY:-full}"
   local exec_ask="${ECOCLAW_EXEC_ASK:-off}"
-  local enable_compaction="${ECOCLAW_ENABLE_COMPACTION:-false}"
   local enable_eviction="${ECOCLAW_ENABLE_EVICTION:-false}"
   local eviction_policy="${ECOCLAW_EVICTION_POLICY:-lru}"
   local eviction_min_block_chars="${ECOCLAW_EVICTION_MIN_BLOCK_CHARS:-256}"
@@ -162,7 +161,7 @@ ensure_ecoclaw_plugin_config() {
     return 0
   fi
 
-  python3 - "${config_path}" "${proxy_base_url}" "${proxy_api_key}" "${proxy_port}" "${plugin_load_path}" "${proxy_pure_forward}" "${reduction_trigger_min_chars}" "${reduction_max_tool_chars}" "${reduction_pass_repeated_read_dedup}" "${reduction_pass_tool_payload_trim}" "${reduction_pass_html_slimming}" "${reduction_pass_exec_output_truncation}" "${reduction_pass_agents_startup_optimization}" "${default_model}" "${exec_host}" "${exec_security}" "${exec_ask}" "${enable_compaction}" "${enable_eviction}" "${eviction_policy}" "${eviction_min_block_chars}" "${eviction_replacement_mode}" "${task_state_estimator_enabled}" "${task_state_estimator_base_url}" "${task_state_estimator_api_key}" "${task_state_estimator_model}" "${task_state_estimator_request_timeout_ms}" "${task_state_estimator_batch_turns}" "${task_state_estimator_eviction_lookahead_turns}" "${task_state_estimator_input_mode}" <<'PATCH_PY'
+  python3 - "${config_path}" "${proxy_base_url}" "${proxy_api_key}" "${proxy_port}" "${plugin_load_path}" "${proxy_pure_forward}" "${reduction_trigger_min_chars}" "${reduction_max_tool_chars}" "${reduction_pass_repeated_read_dedup}" "${reduction_pass_tool_payload_trim}" "${reduction_pass_html_slimming}" "${reduction_pass_exec_output_truncation}" "${reduction_pass_agents_startup_optimization}" "${default_model}" "${exec_host}" "${exec_security}" "${exec_ask}" "${enable_eviction}" "${eviction_policy}" "${eviction_min_block_chars}" "${eviction_replacement_mode}" "${task_state_estimator_enabled}" "${task_state_estimator_base_url}" "${task_state_estimator_api_key}" "${task_state_estimator_model}" "${task_state_estimator_request_timeout_ms}" "${task_state_estimator_batch_turns}" "${task_state_estimator_eviction_lookahead_turns}" "${task_state_estimator_input_mode}" <<'PATCH_PY'
 import json
 import os
 import sys
@@ -185,7 +184,6 @@ import sys
     exec_host,
     exec_security,
     exec_ask,
-    enable_compaction_raw,
     enable_eviction_raw,
     eviction_policy,
     eviction_min_block_chars_raw,
@@ -198,7 +196,7 @@ import sys
     task_state_estimator_batch_turns_raw,
     task_state_estimator_eviction_lookahead_turns_raw,
     task_state_estimator_input_mode,
- ) = sys.argv[1:31]
+ ) = sys.argv[1:30]
 
 proxy_port = int(proxy_port_raw)
 proxy_pure_forward = str(proxy_pure_forward_raw).strip().lower() in ("1", "true", "yes", "on")
@@ -210,7 +208,6 @@ pass_tool_payload_trim = parse_bool(pass_tool_payload_trim_raw)
 pass_html_slimming = parse_bool(pass_html_slimming_raw)
 pass_exec_output_truncation = parse_bool(pass_exec_output_truncation_raw)
 pass_agents_startup_optimization = parse_bool(pass_agents_startup_optimization_raw)
-enable_compaction = parse_bool(enable_compaction_raw)
 enable_eviction = parse_bool(enable_eviction_raw)
 eviction_min_block_chars = int(eviction_min_block_chars_raw)
 task_state_estimator_enabled = parse_bool(task_state_estimator_enabled_raw)
@@ -236,29 +233,20 @@ ecoclaw_cfg["proxyPort"] = proxy_port
 ecoclaw_cfg["proxyBaseUrl"] = proxy_base_url
 if proxy_api_key:
     ecoclaw_cfg["proxyApiKey"] = proxy_api_key
-proxy_mode = ecoclaw_cfg.setdefault("proxyMode", {})
-proxy_mode["pureForward"] = proxy_pure_forward
-
 modules = ecoclaw_cfg.setdefault("modules", {})
 modules["stabilizer"] = True
 modules["policy"] = True
 modules["reduction"] = True
-modules["compaction"] = enable_compaction
 modules["eviction"] = enable_eviction
-modules["decisionLedger"] = True
 
-hooks = ecoclaw_cfg.setdefault("hooks", {})
-hooks["beforeToolCall"] = True
-hooks["toolResultPersist"] = True
-
-context_engine = ecoclaw_cfg.setdefault("contextEngine", {})
-context_engine["enabled"] = True
-context_engine.setdefault("pruneThresholdChars", 100000)
-context_engine.setdefault("keepRecentToolResults", 5)
-context_engine.setdefault("placeholder", "[pruned]")
-
-compaction = ecoclaw_cfg.setdefault("compaction", {})
-compaction["enabled"] = enable_compaction
+ecoclaw_cfg.pop("compaction", None)
+ecoclaw_cfg.pop("proxyMode", None)
+ecoclaw_cfg.pop("hooks", None)
+ecoclaw_cfg.pop("contextEngine", None)
+modules = ecoclaw_cfg.get("modules")
+if isinstance(modules, dict):
+    modules.pop("compaction", None)
+    modules.pop("decisionLedger", None)
 
 eviction = ecoclaw_cfg.setdefault("eviction", {})
 eviction["enabled"] = enable_eviction
@@ -342,7 +330,6 @@ print(
     f"loadPath={plugin_load_path}",
     f"port={ecoclaw_cfg.get('proxyPort')}",
     f"base={ecoclaw_cfg.get('proxyBaseUrl')}",
-    f"pureForward={proxy_mode.get('pureForward')}",
     f"engine={reduction.get('engine')}",
     f"trim={passes.get('toolPayloadTrim')}",
     f"contextEngineSlot={slots.get('contextEngine')}",
@@ -357,6 +344,69 @@ print(
     f"fallbacks={len(model_defaults.get('fallbacks', []))}",
 )
 PATCH_PY
+}
+
+sanitize_ecoclaw_plugin_config() {
+  local config_path="${OPENCLAW_CONFIG_PATH:-${HOME}/.openclaw/openclaw.json}"
+  local enable_eviction="${ECOCLAW_ENABLE_EVICTION:-false}"
+  if [[ ! -f "${config_path}" ]]; then
+    echo "WARN: openclaw config not found, skip ecoclaw config sanitize: ${config_path}" >&2
+    return 0
+  fi
+
+  python3 - "${config_path}" "${enable_eviction}" <<'SANITIZE_PY'
+import json
+import sys
+
+config_path, enable_eviction_raw = sys.argv[1:3]
+enable_eviction = str(enable_eviction_raw).strip().lower() in ("1", "true", "yes", "on")
+
+with open(config_path, "r", encoding="utf-8") as f:
+    cfg = json.load(f)
+
+plugins = cfg.setdefault("plugins", {})
+plugins.setdefault("slots", {}).setdefault("contextEngine", "ecoclaw-context")
+ecoclaw_entry = plugins.setdefault("entries", {}).setdefault("ecoclaw", {})
+ecoclaw_entry["enabled"] = True
+ecoclaw_cfg = ecoclaw_entry.setdefault("config", {})
+
+allowed_top_level = {
+    "enabled",
+    "proxyAutostart",
+    "proxyPort",
+    "proxyBaseUrl",
+    "proxyApiKey",
+    "modules",
+    "eviction",
+    "reduction",
+    "taskStateEstimator",
+}
+for key in list(ecoclaw_cfg.keys()):
+    if key not in allowed_top_level:
+        ecoclaw_cfg.pop(key, None)
+
+ecoclaw_cfg["enabled"] = True
+ecoclaw_cfg["proxyAutostart"] = True
+
+modules = ecoclaw_cfg.get("modules")
+if not isinstance(modules, dict):
+    modules = {}
+ecoclaw_cfg["modules"] = {
+    "stabilizer": True,
+    "policy": True,
+    "reduction": True,
+    "eviction": enable_eviction,
+}
+
+with open(config_path, "w", encoding="utf-8") as f:
+    json.dump(cfg, f, indent=2, ensure_ascii=False)
+    f.write("\n")
+SANITIZE_PY
+}
+
+validate_openclaw_runtime_config() {
+  local config_path="${OPENCLAW_CONFIG_PATH:-${HOME}/.openclaw/openclaw.json}"
+  OPENCLAW_CONFIG_PATH="${config_path}" openclaw config validate >/dev/null
 }
 
 resolve_skill_dir() {

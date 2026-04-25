@@ -65,7 +65,16 @@ def _openclaw_agent_lock() -> Any:
 
 
 def slugify_model(model_id: str) -> str:
-    return model_id.replace("/", "-").replace(".", "-").lower()
+    return normalize_benchmark_model_id(model_id).replace("/", "-").replace(".", "-").lower()
+
+
+def normalize_benchmark_model_id(model_id: str) -> str:
+    value = (model_id or "").strip()
+    if not value:
+        return value
+    # kuaipao expects dotted minor version names like gpt-5.4-mini
+    # and rejects dashed variants like gpt-5-4-mini.
+    return value.replace("gpt-5-4-mini", "gpt-5.4-mini")
 
 
 def _ensure_text(value: Any) -> str:
@@ -206,6 +215,7 @@ def ensure_agent_exists(agent_id: str, model_id: str, workspace_dir: Path) -> bo
     Returns True if the agent was (re)created.
     """
     workspace_dir.mkdir(parents=True, exist_ok=True)
+    model_id = normalize_benchmark_model_id(model_id)
 
     with _openclaw_agent_lock():
         try:
@@ -819,6 +829,7 @@ def execute_openclaw_task(
     multi_agent_ids: Dict[str, str] | None = None,
     cleanup_sessions: bool = True,
     defer_transcript_load: bool = False,
+    initial_session_id: str | None = None,
 ) -> Dict[str, Any]:
     logger.info("🤖 Agent [%s] starting task: %s", agent_id, task.task_id)
     logger.info("   Task: %s", task.name)
@@ -848,7 +859,7 @@ def execute_openclaw_task(
         agent_id=agent_id,
         workspace_override=agent_workspace,
     )
-    session_id = f"{task.task_id}_{int(time.time() * 1000)}"
+    session_id = initial_session_id or f"{task.task_id}_{int(time.time() * 1000)}"
     timeout_seconds = task.timeout_seconds * timeout_multiplier
     if enable_multi_agent:
         timeout_seconds *= MULTI_AGENT_TIMEOUT_MULTIPLIER
@@ -911,8 +922,11 @@ def execute_openclaw_task(
                 multi_agent_ids,
                 timeout_seconds,
             )
-        if index == 0 or session_spec.get("new_session"):
+        if index == 0 and not initial_session_id:
             current_session_id = f"{task.task_id}_s{index + 1}_{int(time.time() * 1000)}"
+        elif session_spec.get("new_session"):
+            current_session_id = f"{task.task_id}_s{index + 1}_{int(time.time() * 1000)}"
+        if current_session_id not in executed_session_ids:
             executed_session_ids.append(current_session_id)
         run_stdout, run_stderr, run_exit_code, run_timed_out = _run_once(
             current_session_id,
@@ -1050,6 +1064,8 @@ def execute_openclaw_task(
     return {
         "agent_id": agent_id,
         "task_id": task.task_id,
+        "final_session_id": current_session_id,
+        "executed_session_ids": executed_session_ids,
         "status": status,
         "transcript": transcript,
         "llm_calls": llm_calls,

@@ -47,6 +47,7 @@ from lib_agent import (
     ensure_agent_exists,
     ensure_multi_agent_exists,
     execute_openclaw_task,
+    normalize_benchmark_model_id,
     slugify_model,
 )
 from lib_grading import GradeResult, grade_task
@@ -954,6 +955,7 @@ def _run_task_job(
     session_mode: str = "isolated",
     agent_id_override: Optional[str] = None,
     agent_workspace_override: Optional[Path] = None,
+    initial_session_id: Optional[str] = None,
     transcript_start_index: int = 0,
     max_llm_calls_per_task: int = 0,
     max_tool_calls_per_task: int = 0,
@@ -1012,6 +1014,7 @@ def _run_task_job(
             defer_transcript_load=bool(
                 defer_continuous_grading and session_mode == "continuous" and not enable_multi_agent
             ),
+            initial_session_id=initial_session_id,
         )
     except Exception as exc:
         execution_error = str(exc)
@@ -1019,6 +1022,8 @@ def _run_task_job(
         result = {
             "agent_id": agent_id,
             "task_id": task.task_id,
+            "final_session_id": initial_session_id or "",
+            "executed_session_ids": [initial_session_id] if initial_session_id else [],
             "status": "error",
             "transcript": [],
             "llm_calls": [],
@@ -1104,6 +1109,7 @@ def _run_task_job(
         "run_index": run_index,
         "job_index": job_index,
         "agent_id": result.get("agent_id", ""),
+        "final_session_id": result.get("final_session_id", ""),
         "transcript_span": {
             "mode": session_mode,
             "start": transcript_slice_start,
@@ -1413,11 +1419,13 @@ def main():
         sys.exit(2)
 
     # Determine judge model: --judge arg > ECOCLAW_JUDGE env > default
+    args.model = normalize_benchmark_model_id(args.model)
     judge_model = args.judge
     if not judge_model:
         judge_model = os.environ.get("ECOCLAW_JUDGE")
     if not judge_model:
         judge_model = "openrouter/anthropic/claude-opus-4.5"
+    judge_model = normalize_benchmark_model_id(judge_model)
     logger.info("Using judge model: %s", judge_model)
 
     if args.register:
@@ -1548,10 +1556,12 @@ def main():
         transcript_cursor_by_agent: Dict[str, int] = {}
         continuous_agent_id: Optional[str] = None
         continuous_agent_workspace: Optional[Path] = None
+        continuous_session_id: Optional[str] = None
         defer_continuous_grading = session_mode == "continuous" and not enable_multi_agent
         if session_mode == "continuous":
             continuous_agent_id = f"bench-{model_slug}-{run_id}-serial"
             continuous_agent_workspace = Path(f"/tmp/pinchbench/{run_id}/agent_workspace_serial")
+            continuous_session_id = f"bench-{model_slug}-{run_id}-continuous-s1-{int(time.time() * 1000)}"
             ensure_agent_exists(continuous_agent_id, args.model, continuous_agent_workspace)
             cleanup_agent_sessions(continuous_agent_id)
             transcript_cursor_by_agent[continuous_agent_id] = 0
@@ -1610,6 +1620,7 @@ def main():
                     session_mode=session_mode,
                     agent_id_override=agent_id_override,
                     agent_workspace_override=workspace_override,
+                    initial_session_id=continuous_session_id if session_mode == "continuous" else None,
                     transcript_start_index=transcript_start,
                     max_llm_calls_per_task=args.max_llm_calls_per_task,
                     max_tool_calls_per_task=args.max_tool_calls_per_task,
@@ -1630,6 +1641,10 @@ def main():
                 transcript_cursor_by_agent[agent_id_override] = int(
                     span.get("end", transcript_cursor_by_agent.get(agent_id_override, 0))
                 )
+            if session_mode == "continuous":
+                latest_session_id = completed_job.get("final_session_id")
+                if isinstance(latest_session_id, str) and latest_session_id.strip():
+                    continuous_session_id = latest_session_id.strip()
     else:
         with ThreadPoolExecutor(max_workers=parallel_jobs) as executor:
             futures = {

@@ -40,7 +40,11 @@ apply_ecoclaw_env
 export ECOCLAW_FORCE_GATEWAY_RESTART="${ECOCLAW_FORCE_GATEWAY_RESTART:-true}"
 recover_stale_openclaw_config_backup
 ensure_ecoclaw_plugin_config
+sanitize_ecoclaw_plugin_config
+validate_openclaw_runtime_config
 ensure_openclaw_gateway_running
+sanitize_ecoclaw_plugin_config
+validate_openclaw_runtime_config
 
 if [[ -z "${ECOCLAW_SKILL_DIR:-}" && -d "${REPO_ROOT}/pinchbench-skill" ]]; then
   export ECOCLAW_SKILL_DIR="${REPO_ROOT}/pinchbench-skill"
