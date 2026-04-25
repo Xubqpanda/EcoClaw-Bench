@@ -11,6 +11,7 @@ SUITE=""
 RUNS=""
 TIMEOUT_MULTIPLIER=""
 PARALLEL=""
+SESSION_MODE=""
 ENABLE_MULTI_AGENT=0
 MULTI_AGENT_ROLES=""
 AGENT_CONFIG=""
@@ -23,6 +24,7 @@ while [[ $# -gt 0 ]]; do
     --runs) RUNS="${2:-}"; shift 2 ;;
     --timeout-multiplier) TIMEOUT_MULTIPLIER="${2:-}"; shift 2 ;;
     --parallel) PARALLEL="${2:-}"; shift 2 ;;
+    --session-mode) SESSION_MODE="${2:-}"; shift 2 ;;
     --enable-multi-agent) ENABLE_MULTI_AGENT=1; shift ;;
     --multi-agent-roles) MULTI_AGENT_ROLES="${2:-}"; shift 2 ;;
     --agent-config) AGENT_CONFIG="${2:-}"; shift 2 ;;
@@ -68,6 +70,7 @@ RESOLVED_SUITE="${SUITE:-${ECOCLAW_SUITE:-automated-only}}"
 RESOLVED_RUNS="${RUNS:-${ECOCLAW_RUNS:-3}}"
 RESOLVED_TIMEOUT="${TIMEOUT_MULTIPLIER:-${ECOCLAW_TIMEOUT_MULTIPLIER:-1.0}}"
 RESOLVED_PARALLEL="${PARALLEL:-${ECOCLAW_PARALLEL:-1}}"
+RESOLVED_SESSION_MODE="${SESSION_MODE:-${ECOCLAW_SESSION_MODE:-isolated}}"
 
 # Multi-agent: resolve from CLI flag or env var
 if [[ "${ENABLE_MULTI_AGENT}" == "0" ]] && [[ "${ECOCLAW_ENABLE_MULTI_AGENT:-false}" =~ ^(true|1|yes)$ ]]; then
@@ -129,6 +132,7 @@ BENCH_ARGS=(
   --suite "${RESOLVED_SUITE}"
   --runs "${RESOLVED_RUNS}"
   --parallel "${RESOLVED_PARALLEL}"
+  --session-mode "${RESOLVED_SESSION_MODE}"
   --timeout-multiplier "${RESOLVED_TIMEOUT}"
   --output-dir "${OUTPUT_DIR}"
   --no-upload
